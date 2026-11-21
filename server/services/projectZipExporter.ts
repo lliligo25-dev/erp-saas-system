@@ -1,0 +1,151 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+
+const EXCLUDED_DIRS = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  '.git',
+  '.erp-server-data',
+  'coverage',
+]);
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buf: Buffer): number {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function toDosTimeDate(d: Date): { time: number; date: number } {
+  const year = Math.max(1980, d.getFullYear());
+  const time =
+    ((d.getHours() & 0x1f) << 11) |
+    ((d.getMinutes() & 0x3f) << 5) |
+    ((d.getSeconds() >> 1) & 0x1f);
+  const date =
+    (((year - 1980) & 0x7f) << 9) |
+    (((d.getMonth() + 1) & 0x0f) << 5) |
+    (d.getDate() & 0x1f);
+  return { time, date };
+}
+
+function shouldIncludeFile(relPosix: string): boolean {
+  const base = path.posix.basename(relPosix);
+  if (base === '.DS_Store' || base.endsWith('.log')) return false;
+  if (base.startsWith('.env') && base !== '.env.example') return false;
+  return true;
+}
+
+function collectProjectFiles(rootDir: string, currentRel = ''): Array<{ relPath: string; absPath: string }> {
+  const targetDir = currentRel ? path.join(rootDir, currentRel) : rootDir;
+  const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+  const results: Array<{ relPath: string; absPath: string }> = [];
+
+  for (const entry of entries) {
+    const relPosix = currentRel ? `${currentRel}/${entry.name}` : entry.name;
+    const absPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      if (EXCLUDED_DIRS.has(entry.name)) continue;
+      results.push(...collectProjectFiles(rootDir, relPosix));
+    } else if (entry.isFile()) {
+      if (shouldIncludeFile(relPosix)) {
+        results.push({ relPath: relPosix, absPath });
+      }
+    }
+  }
+  return results;
+}
+
+export function buildProjectSourceZip(rootDir = process.cwd()): {
+  buffer: Buffer;
+  fileCount: number;
+} {
+  const files = collectProjectFiles(rootDir);
+  const localChunks: Buffer[] = [];
+  const centralChunks: Buffer[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const raw = fs.readFileSync(file.absPath);
+    const stat = fs.statSync(file.absPath);
+    const { time, date } = toDosTimeDate(stat.mtime);
+    const compressed = zlib.deflateRawSync(raw, { level: 6 });
+    const crc = crc32(raw);
+    const nameBuf = Buffer.from(file.relPath, 'utf8');
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(8, 8);
+    localHeader.writeUInt16LE(time, 10);
+    localHeader.writeUInt16LE(date, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(compressed.length, 18);
+    localHeader.writeUInt32LE(raw.length, 22);
+    localHeader.writeUInt16LE(nameBuf.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+
+    localChunks.push(localHeader, nameBuf, compressed);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0x0800, 8);
+    centralHeader.writeUInt16LE(8, 10);
+    centralHeader.writeUInt16LE(time, 12);
+    centralHeader.writeUInt16LE(date, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(compressed.length, 20);
+    centralHeader.writeUInt32LE(raw.length, 24);
+    centralHeader.writeUInt16LE(nameBuf.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+
+    centralChunks.push(centralHeader, nameBuf);
+
+    offset += localHeader.length + nameBuf.length + compressed.length;
+  }
+
+  const centralDirBuf = Buffer.concat(centralChunks);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(files.length, 8);
+  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(centralDirBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return {
+    buffer: Buffer.concat([...localChunks, centralDirBuf, eocd]),
+    fileCount: files.length,
+  };
+}

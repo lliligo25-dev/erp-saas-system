@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body, .font-sans {
+    font-family: var(--ais-font-family, 'Plus Jakarta Sans', 'Noto Sans TC', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  }
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom scrollbars for data tables and tree explorer */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+/* Scoped Viewport Preview Modes (Desktop / Tablet / Laptop / Mobile / Fullscreen) */
+.ais-viewport-frame[data-viewport="mobile"],
+.ais-viewport-frame[data-viewport="tablet"],
+.ais-viewport-frame[data-viewport="laptop"] {
+  transform: translateZ(0);
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .ais-desktop-nav,
+.ais-viewport-frame[data-viewport="mobile"] .ais-header-identity,
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-search-desktop {
+  display: none !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .ais-mobile-nav,
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-mobile-toggle,
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-search-mobile {
+  display: flex !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-sidebar:not(.ais-sidebar-open) {
+  display: none !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-sidebar-backdrop {
+  display: block !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] main {
+  padding: 12px !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .sm\:grid-cols-2,
+.ais-viewport-frame[data-viewport="mobile"] .md\:grid-cols-2,
+.ais-viewport-frame[data-viewport="mobile"] .md\:grid-cols-3,
+.ais-viewport-frame[data-viewport="mobile"] .lg\:grid-cols-3,
+.ais-viewport-frame[data-viewport="mobile"] .lg\:grid-cols-4,
+.ais-viewport-frame[data-viewport="mobile"] .lg\:grid-cols-6,
+.ais-viewport-frame[data-viewport="mobile"] .xl\:grid-cols-4 {
+  grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+}
+
+.ais-viewport-frame[data-viewport="tablet"] .md\:grid-cols-3,
+.ais-viewport-frame[data-viewport="tablet"] .lg\:grid-cols-3,
+.ais-viewport-frame[data-viewport="tablet"] .lg\:grid-cols-4,
+.ais-viewport-frame[data-viewport="tablet"] .xl\:grid-cols-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.ais-viewport-frame[data-viewport="tablet"] .lg\:grid-cols-6 {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+

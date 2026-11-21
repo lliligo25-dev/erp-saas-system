@@ -1,0 +1,6 @@
+{
+  "name": "產銷合一物流直銷單軌轉雙軌 SaaS ERP 系統",
+  "description": "具備 1+1 自動雙發路由、單軌時間序列公排與雙軌二元樹 BFS 智慧滑落、100% 閉環零沉澱清算、GAS 後端程式碼產生器之 ERP 系統",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

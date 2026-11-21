@@ -1,0 +1,642 @@
+<script>
+// 🌟 載入 Google Charts
+google.charts.load('current', {packages:["orgchart"]});
+
+// ==========================================
+// 🌟 魔法核心：萬用設定檔 (20模組雙軌制)
+// ==========================================
+const SYS_CONFIG = {
+  'CONTACT_M': { name: '1. 通訊錄主檔', icon: 'fa-id-badge text-primary', searchMsg: '🔍 搜尋姓名、手機...', catField: '狀態', defaultCat: '活躍', nameField: '姓名', cats: ['活躍', '不常聯絡', '黑名單'], catIcons: ['fa-user-check text-success', 'fa-user-clock text-warning', 'fa-user-slash text-danger'], cardLine1: { icon: 'fa-mobile-alt', key: '手機' }, cardLine2: { icon: 'fa-map-marker-alt', key: '地址' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-user-tag text-info', options: ['活躍', '不常聯絡', '黑名單'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '手機', label: '📱 手機', type: 'tel', half: true }, { id: '電話', label: '☎️ 電話', type: 'tel', half: true }, { id: 'Line', label: '💬 Line ID', type: 'text', half: true }, { id: 'Email', label: '✉️ Email', type: 'email', half: true }, { id: '地址', label: '📍 地址', type: 'textarea' } ] },
+  'CONTACT_T': { name: '2. 聯繫紀錄', icon: 'fa-comments text-success', searchMsg: '🔍 搜尋姓名、內容...', catField: '狀態', defaultCat: '跟進中', nameField: '姓名', cats: ['跟進中', '已結案', '無效'], catIcons: ['fa-spinner text-warning', 'fa-check-circle text-success', 'fa-times-circle text-danger'], cardLine1: { icon: 'fa-calendar-alt', key: '聯繫日期' }, cardLine2: { icon: 'fa-phone-volume', key: '聯繫方式' }, fields: [ { id: '狀態', label: '目前狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['跟進中', '已結案', '無效'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '聯繫日期', label: '📅 聯繫日期', type: 'date', half: true }, { id: '聯繫方式', label: '📞 聯繫方式', type: 'select', options: ['電話', 'Line', '面訪', 'Email'], half: true }, { id: '洽談內容', label: '📝 洽談內容', type: 'textarea' }, { id: '下一步計畫', label: '🚀 下一步計畫', type: 'textarea' } ] },
+
+  'EVENT_M': { name: '1. 活動企劃檔', icon: 'fa-calendar-alt text-primary', searchMsg: '🔍 搜尋主題...', catField: '狀態', defaultCat: '籌備中', nameField: '活動主題', cats: ['籌備中', '進行中', '已結束'], catIcons: ['fa-spinner text-warning', 'fa-play-circle text-success', 'fa-check-square text-secondary'], cardLine1: { icon: 'fa-clock', key: '日期' }, cardLine2: { icon: 'fa-map-marker-alt', key: '地點' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-flag text-info', options: ['籌備中', '進行中', '已結束'], required: true }, { id: '活動主題', label: '📌 活動主題 👈*', type: 'text', required: true }, { id: '日期', label: '📅 日期', type: 'date', half: true }, { id: '負責人', label: '👤 負責人', type: 'text', half: true }, { id: '預算', label: '💰 預算', type: 'number', half: true }, { id: '地點', label: '📍 地點', type: 'text', half: true }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+  'EVENT_T': { name: '2. 活動花絮', icon: 'fa-camera-retro text-success', searchMsg: '🔍 搜尋標題...', catField: '狀態', defaultCat: '審核中', nameField: '活動主題', cats: ['審核中', '已發布'], catIcons: ['fa-eye-slash text-warning', 'fa-eye text-success'], cardLine1: { icon: 'fa-camera', key: '照片標題' }, cardLine2: { icon: 'fa-map-marker-alt', key: '拍攝地點' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-check text-info', options: ['審核中', '已發布'], required: true }, { id: '活動主題', label: '📌 活動主題 👈*', type: 'text', required: true }, { id: '照片標題', label: '📷 照片標題', type: 'text', half: true }, { id: '拍攝地點', label: '📍 拍攝地點', type: 'text', half: true }, { id: '內容備註', label: '📝 內容備註', type: 'textarea' } ] },
+
+  'ATOMY_M': { name: '1. 會員主檔', icon: 'fa-id-card text-primary', searchMsg: '🔍 搜尋姓名、編號...', catField: '狀態', defaultCat: '愛用者', nameField: '姓名', cats: ['經營者', '愛用者', '潛在對象', '停止活動'], catIcons: ['fa-briefcase text-primary', 'fa-heart text-danger', 'fa-eye text-warning', 'fa-ban text-secondary'], cardLine1: { icon: 'fa-hashtag', key: '會員編號' }, cardLine2: { icon: 'fa-sitemap', key: '線別' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-user-tag text-info', options: ['經營者', '愛用者', '潛在對象', '停止活動'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '會員編號', label: '🔑 會員編號', type: 'text', half: true }, { id: '手機', label: '📱 手機', type: 'tel', half: true }, { id: 'Line', label: '💬 Line ID', type: 'text', half: true }, { id: '推薦人', label: '🤝 推薦人', type: 'text', half: true }, { id: '線別', label: '🌿 線別(左/右)', type: 'text' }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+  'ATOMY_T': { name: '2. 銷售與跟進', icon: 'fa-shopping-bag text-success', searchMsg: '🔍 搜尋姓名、消費...', catField: '狀態', defaultCat: '跟進中', nameField: '姓名', cats: ['跟進中', '已成交', '無效'], catIcons: ['fa-spinner text-warning', 'fa-check-circle text-success', 'fa-times-circle text-danger'], cardLine1: { icon: 'fa-shopping-cart', key: '消費項目' }, cardLine2: { icon: 'fa-dollar-sign', key: '消費金額' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['跟進中', '已成交', '無效'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '跟進日期', label: '📅 跟進日期', type: 'date', half: true }, { id: '消費項目', label: '🛒 消費項目', type: 'text', half: true }, { id: '消費金額', label: '💲 消費金額', type: 'number', half: true }, { id: '需求備註', label: '📝 需求備註', type: 'textarea' } ] },
+
+  'ELDER_M': { name: '1. 長者主檔', icon: 'fa-user-check text-primary', searchMsg: '🔍 搜尋姓名、班別...', catField: '狀態', defaultCat: '關懷中', nameField: '姓名', cats: ['關懷中', '結案'], catIcons: ['fa-heartbeat text-success', 'fa-check-circle text-secondary'], cardLine1: { icon: 'fa-phone', key: '手機' }, cardLine2: { icon: 'fa-users', key: '班別' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tag text-info', options: ['關懷中', '結案'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '編號', label: '🔑 編號', type: 'text', half: true }, { id: '手機', label: '📱 手機', type: 'tel', half: true }, { id: '班別', label: '⭐ 班別', type: 'text', half: true }, { id: '緊急電話', label: '☎️ 緊急電話', type: 'tel', half: true }, { id: '家屬', label: '👨‍👩‍👧‍👦 家屬聯絡', type: 'text' }, { id: '地址', label: '📍 地址', type: 'text' }, { id: '健康備註', label: '❤️ 健康備註', type: 'textarea' } ] },
+  'ELDER_T': { name: '2. 訪視紀錄', icon: 'fa-clipboard-list text-success', searchMsg: '🔍 搜尋姓名、內容...', catField: '狀態', defaultCat: '待訪視', nameField: '姓名', cats: ['待訪視', '已訪視', '異常追蹤'], catIcons: ['fa-clock text-warning', 'fa-check-circle text-success', 'fa-exclamation-triangle text-danger'], cardLine1: { icon: 'fa-calendar-alt', key: '訪視日期' }, cardLine2: { icon: 'fa-heartbeat', key: '健康數據' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['待訪視', '已訪視', '異常追蹤'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '訪視日期', label: '📅 訪視日期', type: 'date', half: true }, { id: '健康數據', label: '💓 健康數據(血壓等)', type: 'text', half: true }, { id: '關懷內容', label: '🗣️ 關懷內容', type: 'textarea' }, { id: '後續追蹤', label: '🚀 後續追蹤', type: 'textarea' } ] },
+
+  'PRODUCT_M': { name: '1. 產品主檔', icon: 'fa-box-open text-primary', searchMsg: '🔍 搜尋品名...', catField: '狀態', defaultCat: '上架中', nameField: '品名', cats: ['上架中', '已下架'], catIcons: ['fa-check-circle text-success', 'fa-times-circle text-secondary'], cardLine1: { icon: 'fa-dollar-sign', key: '價格' }, cardLine2: { icon: 'fa-cubes', key: '庫存' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-store text-info', options: ['上架中', '已下架'], required: true }, { id: '品名', label: '🛒 品名 👈*', type: 'text', required: true }, { id: '類別', label: '🏷️ 類別', type: 'text', half: true }, { id: '價格', label: '💲 價格', type: 'number', half: true }, { id: '單位', label: '📦 單位', type: 'text', half: true }, { id: '庫存', label: '🧮 庫存', type: 'number', half: true }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+  'PRODUCT_T': { name: '2. 訂單紀錄', icon: 'fa-shopping-cart text-success', searchMsg: '🔍 搜尋訂單...', catField: '狀態', defaultCat: '待處理', nameField: '姓名', cats: ['待處理', '已出貨', '已結案', '取消'], catIcons: ['fa-clock text-warning', 'fa-truck text-primary', 'fa-check-circle text-success', 'fa-times-circle text-danger'], cardLine1: { icon: 'fa-box', key: '品名' }, cardLine2: { icon: 'fa-dollar-sign', key: '總金額' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['待處理', '已出貨', '已結案', '取消'], required: true }, { id: '姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true }, { id: '品名', label: '🛒 品名', type: 'text', half: true }, { id: '數量', label: '🔢 數量', type: 'number', half: true }, { id: '總金額', label: '💲 總金額', type: 'number', half: true }, { id: '寄送地址', label: '📍 寄送地址', type: 'text' }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+
+  'FRUIT_M': { name: '1. 水果品項檔', icon: 'fa-apple-alt text-primary', searchMsg: '🔍 搜尋品名...', catField: '狀態', defaultCat: '販售中', nameField: '品名', cats: ['販售中', '已斷貨'], catIcons: ['fa-check-circle text-success', 'fa-times-circle text-danger'], cardLine1: { icon: 'fa-dollar-sign', key: '單價' }, cardLine2: { icon: 'fa-map-marker-alt', key: '產地' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-store text-info', options: ['販售中', '已斷貨'], required: true }, { id: '品名', label: '🍎 品名 👈*', type: 'text', required: true }, { id: '類別', label: '🏷️ 類別', type: 'text', half: true }, { id: '單價', label: '💲 單價', type: 'number', half: true }, { id: '單位', label: '📦 單位', type: 'text', half: true }, { id: '庫存量', label: '🧮 庫存量', type: 'number', half: true }, { id: '產地', label: '🌍 產地', type: 'text', half: true }, { id: '供應商', label: '🚚 供應商', type: 'text' }, { id: '備註', label: '📝 備註 (成熟度等)', type: 'textarea' } ] },
+  'FRUIT_T': { name: '2. 進銷存流水', icon: 'fa-exchange-alt text-success', searchMsg: '🔍 搜尋進銷存...', catField: '狀態', defaultCat: '進貨', nameField: '品名', cats: ['進貨', '賣出', '報廢'], catIcons: ['fa-arrow-down text-primary', 'fa-arrow-up text-success', 'fa-trash-alt text-danger'], cardLine1: { icon: 'fa-cubes', key: '數量' }, cardLine2: { icon: 'fa-dollar-sign', key: '總金額' }, fields: [ { id: '狀態', label: '交易類別 👈*', type: 'select', icon: 'fa-exchange-alt text-info', options: ['進貨', '賣出', '報廢'], required: true }, { id: '品名', label: '🍎 品名 👈*', type: 'text', required: true }, { id: '日期', label: '📅 日期', type: 'date', half: true }, { id: '數量', label: '🔢 數量', type: 'number', half: true }, { id: '總金額', label: '💲 總金額', type: 'number', half: true }, { id: '經手人', label: '👤 經手人', type: 'text', half: true }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+
+  'GROCERY_M': { name: '1. 食材主檔', icon: 'fa-shopping-basket text-primary', searchMsg: '🔍 搜尋品名...', catField: '狀態', defaultCat: '常備品', nameField: '品名', cats: ['常備品', '偶爾買'], catIcons: ['fa-star text-warning', 'fa-circle text-secondary'], cardLine1: { icon: 'fa-thermometer-half', key: '預設位置' }, cardLine2: { icon: 'fa-box', key: '單位' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tag text-info', options: ['常備品', '偶爾買'], required: true }, { id: '品名', label: '🛒 品名 👈*', type: 'text', required: true }, { id: '類別', label: '🏷️ 類別', type: 'select', options: ['生鮮肉品', '蔬菜水果', '冷凍食品', '乾貨零食', '飲料乳品', '生活日用'], half: true }, { id: '預設位置', label: '📍 預設位置', type: 'select', options: ['冷藏', '冷凍', '常溫層', '零食櫃', '儲藏室'], half: true }, { id: '單位', label: '📦 單位', type: 'text', half: true }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+  'GROCERY_T': { name: '2. 進出庫紀錄', icon: 'fa-clipboard-check text-success', searchMsg: '🔍 搜尋紀錄...', catField: '狀態', defaultCat: '入庫', nameField: '品名', cats: ['入庫', '出庫/吃完', '過期丟棄'], catIcons: ['fa-arrow-down text-primary', 'fa-utensils text-success', 'fa-trash-alt text-danger'], cardLine1: { icon: 'fa-hourglass-end', key: '有效期限' }, cardLine2: { icon: 'fa-cubes', key: '數量' }, fields: [ { id: '狀態', label: '動向 👈*', type: 'select', icon: 'fa-exchange-alt text-info', options: ['入庫', '出庫/吃完', '過期丟棄'], required: true }, { id: '品名', label: '🛒 品名 👈*', type: 'text', required: true }, { id: '購買日期', label: '📥 購買日期', type: 'date', half: true }, { id: '有效期限', label: '⏳ 有效期限', type: 'date', half: true }, { id: '數量', label: '🧮 數量', type: 'number', half: true }, { id: '處理方式', label: '🔪 處理方式', type: 'text', half: true }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+
+  'NAIL_M': { name: '1. 美甲會員檔', icon: 'fa-user-circle text-primary', searchMsg: '🔍 搜尋姓名...', catField: '狀態', defaultCat: '活躍會員', nameField: '姓名', cats: ['活躍會員', '久未回店'], catIcons: ['fa-user-check text-success', 'fa-user-clock text-warning'], cardLine1: { icon: 'fa-mobile-alt', key: '手機' }, cardLine2: { icon: 'fa-heart', key: '偏好款式' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-user-tag text-info', options: ['活躍會員', '久未回店'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '手機', label: '📱 手機', type: 'tel', half: true }, { id: '性別', label: '⚥ 性別', type: 'select', options: ['女', '男'], half: true }, { id: '生日', label: '🎂 生日', type: 'date', half: true }, { id: '偏好款式', label: '💅 偏好款式', type: 'text', half: true }, { id: '備註', label: '📝 備註(過敏史等)', type: 'textarea' } ] },
+  'NAIL_T': { name: '2. 預約流水線', icon: 'fa-hand-sparkles text-success', searchMsg: '🔍 搜尋預約...', catField: '狀態', defaultCat: '預約中', nameField: '姓名', cats: ['預約中', '施作中', '已完成', '取消'], catIcons: ['fa-calendar-alt text-warning', 'fa-play-circle text-primary', 'fa-check-circle text-success', 'fa-times-circle text-danger'], cardLine1: { icon: 'fa-clock', key: '預約時段' }, cardLine2: { icon: 'fa-user-md', key: '指定美甲師' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['預約中', '施作中', '已完成', '取消'], required: true }, { id: '姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true }, { id: '預約日期', label: '📅 預約日期', type: 'date', half: true }, { id: '預約時段', label: '⏰ 預約時段', type: 'time', half: true }, { id: '指定美甲師', label: '💅 指定美甲師', type: 'text', half: true }, { id: '施作項目', label: '✨ 施作項目', type: 'select', options: ['手部單色', '足部單色', '造型設計', '卸甲保養'], half: true }, { id: '開始時間', label: '⏱️ 開始時間', type: 'datetime-local', half: true }, { id: '結束時間', label: '⏱️ 結束時間', type: 'datetime-local', half: true }, { id: '消費金額', label: '💲 消費金額', type: 'number', half: true } ] },
+
+  'ASSOC_M': { name: '1. 聯誼會員檔', icon: 'fa-building text-primary', searchMsg: '🔍 搜尋診所...', catField: '狀態', defaultCat: '正常會員', nameField: '單位名稱', cats: ['正常會員', '理監事', '停權/退會'], catIcons: ['fa-user text-success', 'fa-user-tie text-primary', 'fa-user-slash text-danger'], cardLine1: { icon: 'fa-user', key: '負責人' }, cardLine2: { icon: 'fa-medal', key: '職務' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-id-card text-info', options: ['正常會員', '理監事', '停權/退會'], required: true }, { id: '單位名稱', label: '🏥 診所/單位 👈*', type: 'text', required: true }, { id: '負責人', label: '👤 負責人', type: 'text', half: true }, { id: '手機', label: '📱 手機', type: 'tel', half: true }, { id: '職務', label: '🎖️ 職務', type: 'text', half: true }, { id: '入會年', label: '📅 入會年(西元)', type: 'number', half: true }, { id: '地址', label: '📍 地址', type: 'textarea' } ] },
+  'ASSOC_T': { name: '2. 繳費與活動', icon: 'fa-file-invoice-dollar text-success', searchMsg: '🔍 搜尋紀錄...', catField: '狀態', defaultCat: '未繳', nameField: '單位名稱', cats: ['未繳', '已繳', '已參加'], catIcons: ['fa-times-circle text-danger', 'fa-check-circle text-success', 'fa-star text-primary'], cardLine1: { icon: 'fa-calendar', key: '年度' }, cardLine2: { icon: 'fa-dollar-sign', key: '金額' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['未繳', '已繳', '已參加'], required: true }, { id: '單位名稱', label: '🏥 診所/單位 👈*', type: 'text', required: true }, { id: '年度', label: '📅 年度', type: 'text', half: true }, { id: '繳費項目', label: '💰 項目(會費/聚餐)', type: 'text', half: true }, { id: '金額', label: '💲 金額', type: 'number', half: true }, { id: '備註', label: '📝 備註', type: 'textarea' } ] },
+
+  'TCM_M': { name: '1. 推拿會員總表', icon: 'fa-id-card text-primary', searchMsg: '🔍 搜尋姓名、手機...', catField: '狀態', defaultCat: '活躍會員', nameField: '姓名', cats: ['活躍會員', '久未回診', '黑名單'], catIcons: ['fa-user-check text-success', 'fa-user-clock text-warning', 'fa-user-slash text-danger'], cardLine1: { icon: 'fa-mobile-alt', key: '手機' }, cardLine2: { icon: 'fa-birthday-cake', key: '生日' }, fields: [ { id: '狀態', label: '會員狀態 👈*', type: 'select', icon: 'fa-user-tag text-info', options: ['活躍會員', '久未回診', '黑名單'], required: true }, { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true }, { id: '手機', label: '📱 手機', type: 'tel', half: true }, { id: '性別', label: '⚥ 性別', type: 'select', options: ['男', '女', '其他'], half: true }, { id: '生日', label: '🎂 生日', type: 'date', half: true }, { id: '病史與備註', label: '📝 病史與身體狀況', type: 'textarea' } ] },
+
+  // 🌟 推拿流水線：已包含所有 datetime-local 欄位
+  'TCM_T': { name: '2. 推拿流水線', icon: 'fa-spa text-success', searchMsg: '🔍 搜尋姓名...', catField: '狀態', defaultCat: '預約中', nameField: '姓名', cats: ['預約中', '執行中', '已完成', '取消'], catIcons: ['fa-calendar-alt text-primary', 'fa-play-circle text-warning', 'fa-check-circle text-success', 'fa-times-circle text-danger'], cardLine1: { icon: 'fa-calendar-day', key: '預約日期' },  cardLine2: { icon: 'fa-user-md', key: '負責推拿師' }, fields: [ { id: '狀態', label: '狀態 👈*', type: 'select', icon: 'fa-tasks text-info', options: ['預約中', '執行中', '已完成', '取消'], required: true }, { id: '姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true }, { id: '預約日期', label: '📅 預約日期', type: 'date', half: true }, { id: '預約時段', label: '⏰ 預約時段', type: 'time', half: true }, { id: '負責推拿師', label: '👨‍⚕️ 負責推拿師', type: 'select', options: ['李永吉','李佳馨'], half: true }, { id: '施作項目', label: '✨ 施作項目', type: 'select', options: ['全身推拿', '半身', '腳底', '拔罐', '其他'], half: true }, { id: '服務節數', label: '🔢 服務節數', type: 'select', options: ['0.5','1.0','1.5','2.0','2.5','3.0','3.5','4.0','4.5','5.0'], half: true }, { id: '開始時間', label: '⏱️ 開始時間', type: 'datetime-local', half: true }, { id: '結束時間', label: '⏱️ 結束時間', type: 'datetime-local', half: true }, { id: '消費金額', label: '💲 消費金額', type: 'number', half: true }, { id: '處置與備註', label: '📝 處置與備註', type: 'textarea' } ] }
+};
+
+var allData = [], photoData = "", drawer;
+var globalFs = parseFloat(localStorage.getItem('fs-level')) || 16;
+var isShareMode = false, selectedPhotos = new Set(), currentCategory = "", currentDateFilter = "", clientToken = "";
+var currentAspect = localStorage.getItem('img-aspect-ratio') || '16/9';
+var previousAspectBeforePlayer = null, currentSysType = 'ORG_TREE';
+var pendingOrderData = null, inheritedPhoto = null; 
+
+// 動態計算「今天、明天、後天」日期的工具函數
+function getOffsetDateStr(offsetDays) {
+  let d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  let y = d.getFullYear();
+  let m = String(d.getMonth() + 1).padStart(2, '0');
+  let day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+function setBaseFontScale(val) {
+  if (val < 14) val = 14; if (val > 22) val = 22; globalFs = val;
+  document.documentElement.style.setProperty('--fs-base', val + 'px'); $('#fs-indicator').text(val + 'px');
+  localStorage.setItem('fs-level', val); if (val > 18) $('.fs-btn-label').hide(); else $('.fs-btn-label').show();
+}
+function updateFS(step) { setBaseFontScale(globalFs + step); }
+
+function buildSideMenu(actualModules) {
+  var $menu = $('#dynamic-menu-container').empty();
+  $menu.append('<div class="nav-item sys-toggle active" data-sys="ORG_TREE" onclick="switchSys(\'ORG_TREE\')"><i class="fas fa-sitemap text-warning" style="width:24px;text-align:center;"></i> <span>組織網矩陣</span></div>');
+  actualModules.forEach(function(mod) {
+    if (mod === 'ORG_TREE') return; 
+    var c = SYS_CONFIG[mod];
+    if(c) $menu.append(['<div class="nav-item sys-toggle" data-sys="', mod, '" onclick="switchSys(\'', mod, '\')"><i class="fas ', c.icon, '" style="width:24px;text-align:center;"></i> <span>', c.name, '</span></div>'].join(''));
+  });
+}
+
+function switchSys(sys) {
+  if (currentSysType === sys && allData.length > 0 && sys !== 'ORG_TREE') return;
+  currentSysType = sys;
+  $('.sys-toggle').removeClass('active'); 
+  $('.sys-toggle[data-sys="' + sys + '"]').addClass('active');
+  if (window.innerWidth <= 768) $('#sidebar').removeClass('mobile-open');
+
+  if (sys === 'ORG_TREE') {
+    $('#system-title').text('直銷組織網矩陣'); $('#system-icon').attr('class', 'fas fa-sitemap text-warning fs-3 me-2');
+    $('#view-erp').hide(); $('#add-btn').hide(); $('#search-bar').parent().hide();
+    $('#view-orgtree').fadeIn();
+    drawTree(); 
+  } else {
+    $('#view-orgtree').hide(); $('#add-btn').show(); $('#search-bar').parent().show();
+    $('#view-erp').fadeIn();
+    
+    const conf = SYS_CONFIG[sys];
+    $('#system-title').text(conf.name); $('#system-icon').attr('class', 'fas ' + conf.icon + ' fs-3 me-2');
+    $('#search-bar, #search-bar-mobile').attr('placeholder', conf.searchMsg);
+    closePlayer(); currentCategory = "";
+    $('#grid').html(['<div class="text-center text-muted py-5 col-12 fw-bold w-100" style="grid-column: 1 / -1;"><i class="fas fa-spinner fa-spin fs-3 mb-2"></i><br>正在獲取', conf.name, '，請稍候...</div>'].join(''));
+    buildDynamicForm(conf); 
+    initData();
+  }
+}
+
+function initData() {
+  google.script.run.withFailureHandler(function(err) {
+    $('#loading-hint').html(['<i class="fas fa-exclamation-triangle text-danger fs-1 mb-3"></i><br><h4 class="text-danger fw-bold">系統錯誤: ', err.message, '</h4>'].join(''));
+  })
+  .withSuccessHandler(function(res) {
+    if (res && res.status === 'error') return $('#loading-hint').html(['<i class="fas fa-exclamation-triangle text-danger fs-1 mb-3"></i><br><h4 class="text-danger fw-bold">', res.msg, '</h4>'].join(''));
+    $('#loading-hint').hide(); allData = res.data || [];
+    
+    var rawModules = (res.modules || 'CONTACT').split(',').map(function(m){ return m.trim(); });
+    var actualModules = ['ORG_TREE']; 
+    rawModules.forEach(function(m) {
+      if (m !== 'ORG_TREE') {
+        if (SYS_CONFIG[m + '_M']) actualModules.push(m + '_M');
+        if (SYS_CONFIG[m + '_T']) actualModules.push(m + '_T');
+      }
+    });
+    
+    if($('.sys-toggle').length === 0) buildSideMenu(actualModules);
+    if (actualModules.indexOf(currentSysType) === -1 && actualModules.length > 0) return switchSys(actualModules[0]);
+    if (currentSysType === 'ORG_TREE') return; 
+    
+    updateCategoryAndRender(); 
+    setImgAspect(currentAspect, $('.aspect-btn[data-ratio="' + (currentAspect === 'detail' ? 'detail' : currentAspect) + '"]')[0], false);
+    
+    if (pendingOrderData && currentSysType.endsWith('_T')) {
+      openDrawer('');
+      let conf = SYS_CONFIG[currentSysType];
+      conf.fields.forEach(function(f, idx) {
+        if (f.id.includes('姓名') || f.id.includes('品名') || f.id.includes('單位') || f.id.includes('負責人')) $('#d_field_' + idx).val(pendingOrderData.name);
+        if (f.id.includes('手機')) $('#d_field_' + idx).val(pendingOrderData.phone);
+      });
+      inheritedPhoto = pendingOrderData.photoUrl;
+      if (inheritedPhoto) { $('#d-preview').attr('src', inheritedPhoto).show(); }
+      pendingOrderData = null; 
+    }
+  }).masterHandler({ token: clientToken, sysType: currentSysType === 'ORG_TREE' ? 'CONTACT_M' : currentSysType, cmd: 'READ' });
+}
+
+function initMatrix() {
+  if(!confirm("⚠️ 警告：這將清空並初始化 5 萬筆直銷矩陣資料庫！確定執行？")) return;
+  $('#chart_div').hide(); $('#tree_loading').show().html("<i class='fas fa-cog fa-spin fs-2'></i><p class='mt-2'>伺服器極速生成 5 萬筆資料中，請稍候...</p>");
+  google.script.run.withSuccessHandler(function(res) { alert(res.message); drawTree('NODE-50001'); }).initMLMDatabase(clientToken);
+}
+
+function drillDown(nodeId) { drawTree(nodeId); }
+function searchTree() {
+  let val = $('#searchNodeId').val().trim();
+  if(!val) return alert("請輸入節點編號！");
+  if(!val.toUpperCase().startsWith('NODE-')) val = 'NODE-' + val;
+  drawTree(val.toUpperCase());
+}
+function goUpLevel() { if(parentOfRoot && parentOfRoot !== '無') drawTree(parentOfRoot); else alert("已經是最頂層了！"); }
+
+function drawTree(rootId) {
+  if(!rootId) rootId = 'NODE-50001'; currentRootId = rootId;
+  $('#searchNodeId').val(rootId.replace('NODE-', ''));
+  $('#chart_div').hide(); $('#tree_loading').show().html("<i class='fas fa-spinner fa-spin fs-2'></i><p class='mt-2'>動態讀取組織下線中...</p>");
+  
+  google.script.run.withSuccessHandler(function(res) {
+    if(res.status==='error') { $('#tree_loading').html(`<h5 class='text-danger'>${res.msg || '讀取失敗'}</h5>`); return; }
+    if(res.data.length === 0) return $('#tree_loading').html("<h5 class='text-danger'>尚未初始化矩陣資料！</h5>");
+    parentOfRoot = res.parentOfRoot; 
+    if(parentOfRoot && parentOfRoot !== '無') $('#btnGoUp').fadeIn(); else $('#btnGoUp').fadeOut();
+    var data = new google.visualization.DataTable();
+    data.addColumn('string', 'Node'); data.addColumn('string', 'Parent'); data.addColumn('string', 'ToolTip');
+    data.addRows(res.data);
+    var chart = new google.visualization.OrgChart(document.getElementById('chart_div'));
+    $('#tree_loading').hide(); $('#chart_div').fadeIn();
+    chart.draw(data, {allowHtml: true, allowCollapse: true, size: 'large'});
+  }).getMLMTreeData(clientToken, rootId);
+}
+
+function updateMatrixNode() {
+  var nodeId = $('#searchNodeId').val().trim(); var owner = $('#ownerName').val().trim();
+  if(!nodeId || !owner) return alert("請確認節點與填寫擁有者！");
+  if(!nodeId.toUpperCase().startsWith('NODE-')) nodeId = 'NODE-' + nodeId;
+  google.script.run.withSuccessHandler(function(res) { alert(res.message); if(res.status==='success') { $('#ownerName').val(''); drawTree(currentRootId); } }).updateMLMNode(clientToken, nodeId.toUpperCase(), owner);
+}
+
+function updateCategoryAndRender() {
+  const conf = SYS_CONFIG[currentSysType];
+  var $container = $('.chips-list').not('.date-chips-list').empty();
+  $container.append('<button class="chip active" data-cat="">全部狀態</button>');
+  conf.cats.forEach(function(cat) { $container.append(['<button class="chip" data-cat="', cat, '">', cat, '</button>'].join('')); });
+  
+  $('.chip:not(.date-chip)').on('click', function() { 
+    $('.chip:not(.date-chip)').removeClass('active'); 
+    $(this).addClass('active'); 
+    currentCategory = $(this).attr('data-cat'); 
+    renderList(); 
+  });
+
+  if ($('#date-filters-container').length === 0) {
+    $('.chips-wrapper').after('<div id="date-filters-container" class="chips-wrapper py-2" style="background:#f8f9fa; border-bottom:1px solid #e9ecef;"><div class="chips-list date-chips-list"></div></div>');
+  }
+  var $dateContainer = $('.date-chips-list').empty();
+  
+  let dateFieldObj = conf.fields.find(function(f) { return f.type === 'date'; });
+  
+  if (dateFieldObj) {
+    $('#date-filters-container').show();
+    $dateContainer.append('<button class="chip date-chip active" data-date="">全部日期</button>');
+    $dateContainer.append('<button class="chip date-chip border-primary text-primary" data-date="' + getOffsetDateStr(0) + '"><i class="fas fa-calendar-day me-1"></i>今日</button>');
+    $dateContainer.append('<button class="chip date-chip border-success text-success" data-date="' + getOffsetDateStr(1) + '"><i class="fas fa-arrow-right me-1"></i>明天</button>');
+    $dateContainer.append('<button class="chip date-chip" data-date="' + getOffsetDateStr(2) + '">後天</button>');
+    $dateContainer.append('<button class="chip date-chip border-danger text-danger" data-date="WEEK"><i class="fas fa-calendar-week me-1"></i>今起星期</button>');
+
+    $('.date-chip').on('click', function() {
+      $('.date-chip').removeClass('active');
+      $(this).addClass('active');
+      currentDateFilter = $(this).attr('data-date');
+      renderList();
+    });
+  } else {
+    $('#date-filters-container').hide(); 
+  }
+
+  var $filterContainer = $('#fast-filters').empty();
+  conf.cats.forEach(function(cat, idx) { $filterContainer.append(['<div class="nav-item" onclick="fastSearch(\'', cat, '\')"><i class="fas ', conf.catIcons[idx % conf.catIcons.length], '"></i> <span>', cat, '</span></div>'].join('')); });
+  renderList();
+}
+
+function renderDashboard() {
+  if ($('#erp-dashboard').length === 0) { $('.chips-wrapper').after('<div id="erp-dashboard" class="px-3 pt-3 pb-1" style="display:none; max-width:800px; margin:0 auto;"></div>'); }
+  if (!currentSysType.endsWith('_T')) { $('#erp-dashboard').hide(); return; }
+
+  let todaySum = 0, monthSum = 0, hasMoney = false;
+  let today = new Date(); let tYear = today.getFullYear(); let tMonth = String(today.getMonth() + 1).padStart(2, '0'); let tDate = String(today.getDate()).padStart(2, '0');
+  let todayStr = tYear + '-' + tMonth + '-' + tDate; let monthStr = tYear + '-' + tMonth;
+
+  allData.forEach(function(item) {
+    let amtKey = item['消費金額'] ? '消費金額' : (item['總金額'] ? '總金額' : (item['金額'] ? '金額' : null));
+    if (amtKey) hasMoney = true;
+    let isDone = ['已完成', '已成交', '已出貨', '已結案', '賣出', '已繳'].includes(item['狀態']);
+    if (isDone && amtKey) {
+      let amt = parseInt(item[amtKey]) || 0;
+      let dStr = item['預約日期'] || item['跟進日期'] || item['日期'] || item['年度'] || item['更新時間'] || "";
+      if (dStr.indexOf(todayStr) !== -1) todaySum += amt;
+      if (dStr.indexOf(monthStr) !== -1) monthSum += amt;
+    }
+  });
+
+  if (!hasMoney) { $('#erp-dashboard').hide(); return; }
+
+  let html = [
+    '<div class="row g-2 mb-2"><div class="col-6">',
+    '<div class="p-3 bg-white rounded-3 shadow-sm border-start border-4 border-success d-flex flex-column justify-content-center">',
+    '<div class="text-muted small fw-bold mb-1"><i class="fas fa-calendar-day text-success me-1"></i>今日業績</div>',
+    '<h4 class="mb-0 text-success fw-bold text-truncate">NT$ ', todaySum.toLocaleString(), '</h4></div></div>',
+    '<div class="col-6"><div class="p-3 bg-white rounded-3 shadow-sm border-start border-4 border-primary d-flex flex-column justify-content-center">',
+    '<div class="text-muted small fw-bold mb-1"><i class="fas fa-calendar-alt text-primary me-1"></i>本月累計業績</div>',
+    '<h4 class="mb-0 text-primary fw-bold text-truncate">NT$ ', monthSum.toLocaleString(), '</h4></div></div></div>'
+  ].join('');
+  $('#erp-dashboard').html(html).slideDown(200);
+}
+
+function renderList() {
+  if (!Array.isArray(allData)) allData = [];
+  var $list = $('#grid').empty();
+  var key = ($('#search-bar').val() || $('#search-bar-mobile').val() || '').toLowerCase();
+  var isDetail = currentAspect === 'detail'; var counter = 0;
+  const conf = SYS_CONFIG[currentSysType];
+
+  let dateFieldObj = conf.fields.find(function(f) { return f.type === 'date'; });
+
+  allData.forEach(function(item) {
+    let itemCat = item[conf.catField] || '未分類';
+    let nameText = item[conf.nameField] || item['照片標題'] || item['活動主題'] || '未填寫';
+    let line1 = ['<i class="fas ', conf.cardLine1.icon, ' me-1"></i> ', (item[conf.cardLine1.key] || '-')].join('');
+    let line2 = ['<i class="fas ', conf.cardLine2.icon, ' me-1"></i> ', (item[conf.cardLine2.key] || '-')].join('');
+    
+    if (item['預約時段']) {
+      line1 += ' ' + item['預約時段'];
+    }
+    
+    let matchString = "";
+    for (var prop in item) { if (item.hasOwnProperty(prop) && item[prop]) matchString += item[prop].toString().toLowerCase() + " "; }
+    
+    let dateMatch = true;
+    if (dateFieldObj && currentDateFilter) {
+      let itemDate = item[dateFieldObj.id] || "";
+      if (currentDateFilter === 'WEEK') {
+        let dItem = new Date(itemDate);
+        let dToday = new Date(getOffsetDateStr(0));
+        let dNextWeek = new Date(getOffsetDateStr(7));
+        dateMatch = (itemDate !== "" && dItem >= dToday && dItem < dNextWeek);
+      } else {
+        dateMatch = (itemDate === currentDateFilter);
+      }
+    }
+    
+    if((currentCategory === "" || itemCat === currentCategory) && dateMatch && matchString.indexOf(key) !== -1) {
+      counter++;
+      var imgUrl = item.照片連結 || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800';
+      var thumbBadgeHtml = isDetail ? '' : ['<div class="yt-badge shadow"><i class="fas fa-tag"></i> ', itemCat, '</div>'].join('');
+      var avatar = ['<div class="author-avatar" style="background-color: ', getAvatarColor(nameText), '">', nameText.charAt(0), '</div>'].join('');
+      var nameBadge = isDetail ? ['<span class="badge text-secondary ms-2" style="font-size: 12px; font-weight: normal; border: 1px solid rgba(0,0,0,0.15); background-color: transparent;">', itemCat, '</span>'].join('') : '';
+      
+      var cardHtml = [
+        '<div class="video-card ', (selectedPhotos.has(item.ID) ? 'is-selected' : ''), '" id="card-', item.ID, '">',
+          '<div class="thumbnail-wrapper" onclick="event.stopPropagation(); handleCardClick(\'', item.ID, '\', \'photo\', event)">',
+            '<div class="ambient-blur" style="background-image: url(\'', imgUrl, '\');"></div><img src="', imgUrl, '" loading="lazy" class="thumbnail">',
+            thumbBadgeHtml, '<div class="selection-overlay"><i class="fas fa-check-circle text-white" style="font-size:3.5rem;"></i></div>',
+          '</div>',
+          '<div class="details">',
+            avatar,
+            '<div class="meta">',
+              '<div class="title"><span class="item-name-text">', nameText, '</span>', nameBadge, '</div>',
+              '<div class="channel">', line1, '</div><div class="views">', line2, ' • ', (item.更新時間 || ''), '</div>',
+            '</div>',
+            '<button class="yt-more-btn" onclick="event.stopPropagation(); handleCardClick(\'', item.ID, '\', \'drawer\', event)"><i class="fas fa-ellipsis-v"></i></button>',
+          '</div></div>'
+      ].join('');
+      $list.append(cardHtml);
+    }
+  });
+  
+  if (counter === 0) $list.html('<div class="text-center w-100 text-muted mt-5 pt-3" style="grid-column: 1 / -1;"><i class="fas fa-search-minus fs-1 opacity-25"></i><h4 class="mt-3">找不到符合條件的紀錄</h4></div>');
+  renderDashboard();
+}
+
+// 🌟 1. 處理表單欄位動態顯示/隱藏的專屬函數
+function applyDynamicUI() {
+  if (currentSysType === 'TCM_T') {
+    let status = $('#d_field_0').val();
+    
+    $('[data-field]').show(); // 先恢復顯示
+    
+    if (status === '預約中') {
+      // 預約中隱藏：開始時間、結束時間、消費金額
+      $('[data-field="開始時間"], [data-field="結束時間"], [data-field="消費金額"]').hide();
+    } else if (status === '執行中') {
+      // 執行中隱藏：預約日期、預約時段
+      $('[data-field="預約日期"], [data-field="預約時段"]').hide();
+    }
+  }
+}
+
+// 🌟 2. 修改表單建構，加上 data-field 並綁定 change 事件
+function buildDynamicForm(conf) {
+  let formHtmlParts = [];
+  formHtmlParts.push('<div class="p-3 bg-light rounded border border-light shadow-sm mb-3">');
+  formHtmlParts.push('<h6 class="fw-bold mb-3 border-bottom pb-2 text-secondary fs-title"><i class="fas ', conf.fields[0].icon, '"></i> 主分類設定</h6>');
+  formHtmlParts.push('<div class="form-floating"><select id="d_field_0" class="form-select border-0 shadow-sm fw-bold">');
+  conf.fields[0].options.forEach(function(opt) { formHtmlParts.push('<option value="', opt, '">', opt, '</option>'); });
+  formHtmlParts.push('</select><label>', conf.fields[0].label, '</label></div></div>');
+  
+  let rowOpen = false;
+  for(let i=1; i<conf.fields.length; i++) {
+    let f = conf.fields[i]; let inputHtml = '';
+    if(f.type === 'textarea') { inputHtml = ['<textarea id="d_field_', i, '" class="form-control pt-4 bg-white border-0" placeholder="', f.label, '" style="height:80px"></textarea>'].join(''); } 
+    else if(f.type === 'select') {
+      let selParts = ['<select id="d_field_', i, '" class="form-select bg-white">'];
+      f.options.forEach(function(o) { selParts.push('<option value="', o, '">', o, '</option>'); });
+      selParts.push('</select>'); inputHtml = selParts.join('');
+    } 
+    else { inputHtml = ['<input type="', f.type, '" id="d_field_', i, '" class="form-control bg-white" placeholder="', f.label, '">'].join(''); }
+    
+    // 👉 在 div 上面掛載 data-field 屬性，讓 applyDynamicUI 可以抓到它
+    let wrap = ['<div data-field="', f.id, '" class="', (f.half ? 'col-6' : 'col-12'), ' form-floating mb-3 shadow-sm rounded">', inputHtml, '<label class="ms-2">', f.label, '</label></div>'].join('');
+    
+    if(f.half) {
+      if(!rowOpen) { formHtmlParts.push('<div class="row g-2">'); rowOpen = true; }
+      formHtmlParts.push(wrap);
+      if (i === conf.fields.length - 1 || !conf.fields[i+1].half) { formHtmlParts.push('</div>'); rowOpen = false; }
+    } else { formHtmlParts.push(wrap); }
+  }
+  $('#dynamic-form-container').html(formHtmlParts.join(''));
+  
+  // 👉 綁定事件：當狀態切換時，自動觸發隱藏邏輯
+  $('#d_field_0').off('change').on('change', applyDynamicUI);
+}
+
+function buildDynamicView(item) {
+  const conf = SYS_CONFIG[currentSysType];
+  let catVal = item[conf.catField] || conf.defaultCat;
+  let nameVal = item[conf.nameField] || item['照片標題'] || item['活動主題'] || '未命名';
+  
+  let viewParts = [];
+  viewParts.push('<div class="p-3 bg-light border rounded-3 mb-4 shadow-sm border-opacity-25 border-primary">');
+  viewParts.push('<div class="text-primary-emphasis fw-bold text-sm mb-1"><i class="fas ', conf.fields[0].icon, '"></i> 分類屬性</div>');
+  viewParts.push('<div class="fw-bold mt-1 fs-title"><span class="text-dark">', nameVal, '</span><span class="badge bg-primary ms-2 shadow-sm align-text-bottom">', catVal, '</span></div>');
+  viewParts.push('</div><ul class="list-group list-group-flush mb-4 px-1 fs-title">');
+  
+  for(let i=2; i<conf.fields.length; i++) {
+    let f = conf.fields[i]; let val = item[f.id] || '-';
+    if ((f.id.includes('金額') || f.id.includes('價格') || f.id.includes('單價')) && val && val !== '-') val = '<span class="text-danger fw-bold fs-5">NT$ ' + parseInt(val).toLocaleString() + '</span>';
+    if(f.type === 'datetime-local' && val && val !== '-') val = val.replace('T', ' ');
+    viewParts.push('<li class="list-group-item text-muted text-sm px-0 border-light">', (f.label.split(' ')[1] || f.label), ' <br><span class="text-dark fw-bold ps-4 d-block mt-2 fs-title" style="white-space:pre-wrap;">', val, '</span></li>');
+  }
+  viewParts.push('</ul>');
+  
+  let baseSys = currentSysType.split('_')[0]; 
+  let isMaster = currentSysType.endsWith('_M');
+  let isTrans = currentSysType.endsWith('_T');
+
+  if (isMaster) {
+    let photoSafe = item['照片連結'] ? item['照片連結'] : '';
+    let targetSys = baseSys + '_T';
+    let pPhone = item['手機'] || item['電話'] || '';
+    if (SYS_CONFIG[targetSys]) {
+      viewParts.push(['<button class="btn btn-primary w-100 fs-title shadow-sm mb-3 py-3 fw-bold" onclick="jumpToTrans(\'', targetSys, '\', \'', nameVal, '\', \'', pPhone, '\', \'', photoSafe, '\')"><i class="fas fa-arrow-circle-right me-2"></i>建立新紀錄 (自動跳轉)</button>'].join(''));
+    }
+  }
+
+  // 🌟 3. 結帳與推進狀態邏輯 (執行完成 -> 結帳)
+  if (isTrans) {
+    let isStartable = ['預約中', '待處理', '入庫', '跟進中', '未繳'].includes(catVal);
+    let isExecutable = ['執行中', '進行中', '施作中'].includes(catVal);
+    let hasMoney = conf.fields.some(function(f){ return f.id.includes('金額'); });
+
+    if (isStartable && SYS_CONFIG[currentSysType].fields.some(function(f){ return f.id === '狀態'; })) {
+      let nextState = '執行中';
+      if (currentSysType === 'PRODUCT_T') nextState = '已出貨';
+      else if (currentSysType === 'GROCERY_T') nextState = '出庫/吃完';
+      else if (currentSysType === 'ATOMY_T') nextState = '已成交';
+      else if (currentSysType === 'ASSOC_T') nextState = '已繳';
+      viewParts.push(['<button class="btn btn-warning text-dark w-100 fs-title shadow-sm mb-3 py-3 fw-bold" onclick="changeOrderStatus(\'', item.ID, '\', \'', nextState, '\', event)"><i class="fas fa-play-circle me-2"></i>開始推進狀態 (自動打卡)</button>'].join(''));
+    } else if (isExecutable) {
+      // 執行完成的按鈕：因為有 hasMoney=true，點擊後會進入 quickCheckout 結帳！
+      let btnText = hasMoney ? '結帳完成 (算入營收)' : '確認完成';
+      viewParts.push(['<button class="btn btn-success w-100 fs-title shadow-sm mb-3 py-3 fw-bold" onclick="quickCheckout(\'', item.ID, '\', event, ', hasMoney, ')"><i class="fas fa-check-circle me-2"></i>', btnText, '</button>'].join(''));
+    }
+  }
+
+  $('#dynamic-view-container').html(viewParts.join(''));
+}
+
+function getCurrentDateTimeStr() {
+  let now = new Date(); 
+  let y = now.getFullYear();
+  let m = String(now.getMonth() + 1).padStart(2, '0');
+  let d = String(now.getDate()).padStart(2, '0');
+  let h = String(now.getHours()).padStart(2, '0');
+  let min = String(now.getMinutes()).padStart(2, '0');
+  return y + '-' + m + '-' + d + 'T' + h + ':' + min;
+}
+
+function jumpToTrans(targetSys, nameStr, phoneStr, photoUrl) {
+  drawer.hide();
+  pendingOrderData = { name: nameStr, phone: phoneStr, photoUrl: photoUrl };
+  switchSys(targetSys); 
+}
+
+function changeOrderStatus(id, newStatus, event) {
+  let item = null; for (var i = 0; i < allData.length; i++) { if (String(allData[i].ID) === String(id)) { item = allData[i]; break; } }
+  if(!item) return;
+
+  let $btn = $(event.currentTarget); let originHtml = $btn.html();
+  $btn.html('<i class="fas fa-spinner fa-spin me-2"></i>推進中...').prop('disabled', true);
+
+  let ds = { ID: item.ID, photoData: "" };
+  SYS_CONFIG[currentSysType].fields.forEach(function(f) { ds[f.id] = item[f.id] || ""; });
+  ds['狀態'] = newStatus;
+  
+  if (ds['開始時間'] !== undefined) ds['開始時間'] = getCurrentDateTimeStr();
+
+  google.script.run.withSuccessHandler(function(res) { drawer.hide(); initData(); }).masterHandler({ token: clientToken, sysType: currentSysType, cmd: 'SAVE', data: ds });
+}
+
+function quickCheckout(id, event, hasMoney) {
+  let item = null; for (var i = 0; i < allData.length; i++) { if (String(allData[i].ID) === String(id)) { item = allData[i]; break; } }
+  if(!item) return;
+  
+  let ds = { ID: item.ID, photoData: "" };
+  SYS_CONFIG[currentSysType].fields.forEach(function(f) { ds[f.id] = item[f.id] || ""; });
+  
+  if (hasMoney) {
+    let moneyField = Object.keys(ds).find(function(k){ return k.includes('金額'); });
+    if (moneyField) {
+      let amt = prompt('請輸入本次【' + moneyField + '】：', item[moneyField] || "");
+      if(amt === null) return;
+      let amtNum = parseInt(amt); if(isNaN(amtNum)) { alert("❌ 請輸入有效的數字金額！"); return; }
+      ds[moneyField] = amtNum;
+    }
+  }
+
+  let $btn = $(event.currentTarget); let originHtml = $btn.html();
+  $btn.html('<i class="fas fa-spinner fa-spin me-2"></i>處理中...').prop('disabled', true);
+
+  ds['狀態'] = '已完成';
+  if (ds['結束時間'] !== undefined) ds['結束時間'] = getCurrentDateTimeStr();
+
+  google.script.run
+  .withFailureHandler(function(err) { alert("❌ 結帳失敗: " + err.message); $btn.html(originHtml).prop('disabled', false); })
+  .withSuccessHandler(function(res) {
+     if(res.status === 'error') { alert("❌ " + res.msg); $btn.html(originHtml).prop('disabled', false); return; }
+     alert('✅ 處理成功！'); drawer.hide(); initData();
+  }).masterHandler({ token: clientToken, sysType: currentSysType, cmd: 'SAVE', data: ds });
+}
+
+function openDrawer(id) {
+  const conf = SYS_CONFIG[currentSysType];
+  inheritedPhoto = null; 
+  var item = null; for (var i = 0; i < allData.length; i++) { if (String(allData[i].ID) === String(id)) { item = allData[i]; break; } }
+  toggleEdit(false);
+
+  if (item) {
+    $('#drawer-title').html('<i class="fas fa-info-circle text-primary me-2"></i>詳細資料'); $('#d-id').val(item.ID);
+    buildDynamicView(item);
+    conf.fields.forEach(function(f, i) { $('#d_field_' + i).val(item[f.id] || ''); });
+    $('#d-preview, #v-img').attr('src', item.照片連結 || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800').show();
+  } else {
+    $('#drawer-title').html('<i class="fas fa-plus-circle text-danger me-2"></i>新增資料'); $('#d-id').val('');
+    conf.fields.forEach(function(f, i) { $('#d_field_' + i).val(''); });
+    $('#d_field_0').val(localStorage.getItem('actClass_' + currentSysType) || conf.defaultCat);
+    $('#d-preview').hide().attr('src', ''); photoData = ""; 
+    $('#form-drawer').show(); $('#drawer-icon').removeClass('fa-chevron-down').addClass('fa-chevron-up'); 
+    toggleEdit(true);
+  }
+  
+  // 🌟 4. 打開抽屜時，確保依照目前的狀態來隱藏或顯示對應的欄位！
+  applyDynamicUI(); 
+  drawer.show();
+}
+
+function saveData(isContinuous) {
+  const conf = SYS_CONFIG[currentSysType];
+  var ds = { ID: $('#d-id').val(), photoData: photoData, 傳承照片: inheritedPhoto || "" };
+  for(let i=0; i<conf.fields.length; i++) {
+    let f = conf.fields[i]; let val = $('#d_field_' + i).val();
+    if(f.required && (!val || !val.trim())) { alert('❌ 請填寫必填欄位: ' + f.label.replace('👈*','') + '！'); return; }
+    ds[f.id] = typeof val === 'string' ? val.trim() : val;
+  }
+  localStorage.setItem('actClass_' + currentSysType, ds[conf.fields[0].id]);
+
+  var $btn = isContinuous ? $('#save-continue-btn') : $('#save-btn'); var originalText = $btn.html();
+  $btn.html('<i class="fas fa-spin fa-sync-alt me-2"></i>傳輸當中...').prop('disabled',true); $('#save-btn, #save-continue-btn').prop('disabled', true);
+
+  google.script.run
+  .withFailureHandler(function(err) { alert("❌ 儲存失敗: " + err.message); $btn.html(originalText); $('#save-btn, #save-continue-btn').prop('disabled', false); })
+  .withSuccessHandler(function(res) {
+    if (res && res.status === 'error') { alert("❌ 錯誤：" + res.msg); $btn.html(originalText); $('#save-btn, #save-continue-btn').prop('disabled', false); return; }
+    photoData = ""; inheritedPhoto = null;
+    $btn.html('<i class="fas fa-check-circle me-2"></i>成功！').prop('disabled', false).delay(1000).queue(function(nx){ $(this).html(originalText); $('#save-btn, #save-continue-btn').prop('disabled', false); nx(); });
+    if (isContinuous) { 
+      conf.fields.forEach(function(f, i) { if(i!==0) $('#d_field_' + i).val(''); }); 
+      $('#d-preview').hide(); $('#form-drawer').hide(); $('#drawer-icon').removeClass('fa-chevron-up').addClass('fa-chevron-down'); 
+      $('.offcanvas-body').animate({ scrollTop: 0 }, 300); setTimeout(function() { $('#f-camera').click(); }, 350); 
+    } else { drawer.hide(); } initData();
+  }).masterHandler({ token: clientToken, sysType: currentSysType, cmd: 'SAVE', data: ds });
+}
+
+function openTopPlayer(item) {
+  const conf = SYS_CONFIG[currentSysType];
+  if ($('#yt-player-wrapper').is(':hidden') && currentAspect !== '16/9') previousAspectBeforePlayer = currentAspect;
+  var imgUrl = item.照片連結 || 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800';
+  $('#yt-player-img').attr('src', imgUrl).off('click').on('click', function() { openLightbox(imgUrl); });
+
+  $('#yt-player-title').text(item[conf.nameField] || item['照片標題'] || item['活動主題'] || '未填寫');
+  var catText = item[conf.catField] || '未分類';
+  var subHtml = [
+    '<span class="badge bg-primary shadow-sm px-2 py-1"><i class="fas fa-tag"></i> ', catText, '</span>',
+    '<span class="text-primary fw-bold ms-2"><i class="fas ', conf.cardLine1.icon, '"></i> ', (item[conf.cardLine1.key] || '-'), '</span>',
+    '<span class="ms-2"><i class="fas ', conf.cardLine2.icon, '"></i> ', (item[conf.cardLine2.key] || '-'), '</span>',
+    '<div class="d-flex ms-auto gap-2"><button class="btn btn-sm btn-outline-primary fw-bold shadow-sm" style="border-radius:20px; font-size:0.9rem;" onclick="openDrawer(\'', item.ID, '\')"><i class="fas fa-info-circle me-1"></i>完整明細</button></div>'
+  ].join('');
+  
+  $('#yt-player-subtitle').html(subHtml);
+  $('.player-info').removeClass('minimized').show(); $('#yt-player-wrapper').slideDown(250);
+  setImgAspect('16/9', $('.aspect-btn[data-ratio="16/9"]')[0], true); window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function closePlayer() {
+  $('#yt-player-wrapper').slideUp(250, function() { $('.player-info').removeClass('minimized').show(); });
+  if (previousAspectBeforePlayer && previousAspectBeforePlayer !== '16/9') { setImgAspect(previousAspectBeforePlayer, $('.aspect-btn[data-ratio="' + previousAspectBeforePlayer + '"]')[0], true); previousAspectBeforePlayer = null; }
+}
+
+function executeShare() {
+  const conf = SYS_CONFIG[currentSysType];
+  if (selectedPhotos.size === 0) return alert("⚠️ 請至少點選一筆紀錄！");
+  var groupName = $('#share-group-name').val().trim(); if (!groupName) return alert("⚠️ 請輸入發送群組名稱！");
+  var payloadPhotos = [];
+  selectedPhotos.forEach(function(id) {
+    var p = null; for (var i = 0; i < allData.length; i++) { if (String(allData[i].ID) === String(id)) { p = allData[i]; break; } }
+    if (p) payloadPhotos.push({ ID: p.ID, title: p[conf.nameField] || p['照片標題'] || p['活動主題'] || '紀錄', url: p.照片連結 }); 
+  });
+  var $btn = $('#execute-share-btn'); var originalText = $btn.html(); $btn.html('<i class="fas fa-spinner fa-spin me-1"></i> 傳送中...').prop('disabled', true);
+  google.script.run.withSuccessHandler(function(res) {
+    if (res && res.status === 'error') { alert("❌ 錯誤：" + res.msg); $btn.html(originalText).prop('disabled', false); return; }
+    alert(res.msg || "分享成功！"); $btn.html(originalText).prop('disabled', false); $('#share-group-name').val(''); toggleShareMode();
+  }).masterHandler({ token: clientToken, sysType: currentSysType, cmd: 'SHARE', data: { group: groupName, photos: payloadPhotos } });
+}
+
+function setImgAspect(ratio, btnEl, fromPlayer) {
+  if (fromPlayer === undefined) fromPlayer = false; currentAspect = ratio;
+  if (!fromPlayer && ratio !== 'detail') { $('#yt-player-wrapper').slideUp(250); previousAspectBeforePlayer = null; }
+  document.documentElement.style.setProperty('--img-aspect-ratio', ratio === 'detail' ? '16/9' : ratio);
+  $('.aspect-btn').removeClass('active'); if (btnEl) $(btnEl).addClass('active');
+  var $grid = $('#grid'); if (ratio === 'detail') $grid.addClass('layout-detail').removeClass('aspect-16-9 aspect-3-4 aspect-4-3 aspect-1-1'); else $grid.removeClass('layout-detail aspect-16-9 aspect-3-4 aspect-4-3 aspect-1-1').addClass('aspect-' + ratio.replace('/', '-'));
+  localStorage.setItem('img-aspect-ratio', ratio); if (window.innerWidth <= 768 && !fromPlayer) $('#sidebar').removeClass('mobile-open'); renderList();
+}
+function toggleEdit(is) { $('#view-mode').toggle(!is); if(is) $('#edit-mode').css('display', 'flex'); else $('#edit-mode').hide(); }
+var colors = ['#065fd4', '#c4302b', '#28a745', '#e91e63', '#6f42c1', '#fd7e14', '#17a2b8', '#009688'];
+function getAvatarColor(name) { if (!name) return colors[0]; var sum = 0; for(var i = 0; i < name.length; i++) sum += name.charCodeAt(i); return colors[sum % colors.length]; }
+function fastSearch(term) { $('#search-bar, #search-bar-mobile').val(term); currentCategory = term; $('.chip').removeClass('active'); $('.chip').each(function(){ if($(this).attr('data-cat') === term) $(this).addClass('active'); }); if(window.innerWidth <= 768) $('#sidebar').removeClass('mobile-open'); renderList(); }
+function resetSearch() { $('#search-bar, #search-bar-mobile').val(''); currentCategory = ""; $('.chip').removeClass('active'); $('.chip[data-cat=""]').addClass('active'); if(window.innerWidth <= 768) $('#sidebar').removeClass('mobile-open'); renderList(); }
+
+$(document).ready(function() {
+  clientToken = $('#serverToken').val();
+  if (!clientToken) return $('#loading-hint').html('<h4 class="text-danger fw-bold text-center mt-5">❌ 拒絕存取：缺少通行證</h4>');
+  setBaseFontScale(globalFs); 
+  drawer = new bootstrap.Offcanvas(document.getElementById('drawer'));
+  initData();
+});
+
+$('#add-btn').on('click', function() { openDrawer(''); }); 
+$('#share-toggle-btn').on('click', toggleShareMode); 
+$('#execute-share-btn').on('click', executeShare);
+$('#save-btn').on('click', function() { saveData(false); }); 
+$('#save-continue-btn').on('click', function() { saveData(true); }); 
+$('#search-bar, #search-bar-mobile').on('input', renderList);
+
+function handleCardClick(id, target, event) {
+  var item = null; for (var i = 0; i < allData.length; i++) { if (String(allData[i].ID) === String(id)) { item = allData[i]; break; } }
+  if(!item) return;
+  if (isShareMode) { if (selectedPhotos.has(id)) { selectedPhotos.delete(id); $('#card-' + id).removeClass('is-selected'); } else { selectedPhotos.add(id); $('#card-' + id).addClass('is-selected'); } $('#share-count').text(selectedPhotos.size); } else { if (target === 'photo') openTopPlayer(item); else if (target === 'drawer') openDrawer(id); }
+}
+function toggleShareMode() {
+  isShareMode = !isShareMode; selectedPhotos.clear();
+  if (isShareMode) { $('body').addClass('is-share-mode'); $('#share-toggle-btn').removeClass('bg-light').addClass('bg-success text-white'); $('#share-bar').addClass('active'); $('#add-btn, #search-toggle').hide(); $('#share-count').text('0'); }
+  else { $('body').removeClass('is-share-mode'); $('#share-toggle-btn').addClass('bg-light').removeClass('bg-success text-white'); $('#share-bar').removeClass('active'); $('#add-btn, #search-toggle').fadeIn(); } renderList();
+}
+$(window).on('scroll', function() { if ($('#yt-player-wrapper').is(':visible')) { if ($(window).scrollTop() > 30) { if (!$('.player-info').hasClass('minimized')) $('.player-info').addClass('minimized').slideUp(200); } else { if ($('.player-info').hasClass('minimized')) $('.player-info').removeClass('minimized').slideDown(200); } }});
+$('body').on('click', function() { if(window.innerWidth <= 768 && $('#sidebar').hasClass('mobile-open')) $('#sidebar').removeClass('mobile-open'); });
+$('#sidebar').on('click', function(e) { e.stopPropagation(); }); $('#menu-toggle').on('click', function(e) { e.stopPropagation(); if (window.innerWidth <= 768) $('#sidebar').toggleClass('mobile-open'); else { $('#sidebar').toggleClass('collapsed'); $('.sidebar-title').toggle(); } }); $('#search-toggle').on('click', function() { $('#mobile-search-container').collapse('toggle'); });
+
+$('#form-drawer-btn').on('click', function() {
+  $('#form-drawer').slideToggle(250, function() {
+    if ($(this).is(':visible')) { $('#drawer-icon').removeClass('fa-chevron-down').addClass('fa-chevron-up'); } 
+    else { $('#drawer-icon').removeClass('fa-chevron-up').addClass('fa-chevron-down'); }
+  });
+});
+
+$('#f-camera, #f-file').on('change', function() { if(!this.files[0]) return; var r = new FileReader(); r.onload = function(e) { var i = new Image(); i.onload = function() { var c = document.createElement('canvas'); var max = 1000; var rx = i.width > max ? max/i.width : 1; c.width = i.width * rx; c.height = i.height * rx; c.getContext('2d').drawImage(i, 0, 0, c.width, c.height); photoData = c.toDataURL('image/jpeg', 0.65); $('#d-preview').attr('src', photoData).show(); }; i.src = e.target.result; }; r.readAsDataURL(this.files[0]); });
+$('#btn-camera').on('click', function() { $('#f-camera').click(); }); $('#btn-file').on('click', function() { $('#f-file').click(); });
+var $lb = $('#lightbox'), $lbImg = $('#lightbox-img');
+function openLightbox(url) { if(!url) return; $lbImg.attr('src', url).removeClass('lb-zoomed').css('transform', 'scale(1)'); $lb.fadeIn(150).css('display','flex'); }
+function closeLB(e) { e.stopPropagation(); $lb.fadeOut(150); }
+$lbImg.on('click', function(e) { e.stopPropagation(); if (!$(this).hasClass('lb-zoomed')) { var re = this.getBoundingClientRect(); var Xprct = ((e.clientX - re.left) / re.width) * 100; var Yprct = ((e.clientY - re.top) / re.height) * 100; $(this).css('transform-origin', Xprct + '% ' + Yprct + '%').addClass('lb-zoomed').css('transform', 'scale(2.4)'); } else { $(this).removeClass('lb-zoomed').css('transform', 'scale(1)'); }});
+</script>
