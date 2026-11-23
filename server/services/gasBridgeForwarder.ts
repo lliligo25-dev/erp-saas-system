@@ -21,10 +21,23 @@ export interface GasBridgeSyncStatus {
   remoteStats?: Record<string, any> | null;
 }
 
+export interface GasHydrationStatus {
+  ok: boolean;
+  message: string;
+  timestamp: string;
+  spreadsheetName?: string;
+  importedMembers: number;
+  importedMonoline: number;
+  importedBinary: number;
+  importedContacts: number;
+  importedTrackings: number;
+}
+
 export interface GasBridgeServerState {
   gasWebAppUrl: string;
   autoSyncEnabled: boolean;
   lastSyncStatus: GasBridgeSyncStatus | null;
+  lastHydrationStatus?: GasHydrationStatus | null;
 }
 
 export function validateGasExecUrl(rawUrl: string): {
@@ -66,6 +79,7 @@ function loadState(): GasBridgeServerState {
         gasWebAppUrl: check.valid ? check.normalized : DEFAULT_SERVER_GAS_EXEC_URL,
         autoSyncEnabled: typeof raw.autoSyncEnabled === 'boolean' ? raw.autoSyncEnabled : true,
         lastSyncStatus: raw.lastSyncStatus || null,
+        lastHydrationStatus: raw.lastHydrationStatus || null,
       };
     }
   } catch {
@@ -75,6 +89,7 @@ function loadState(): GasBridgeServerState {
     gasWebAppUrl: DEFAULT_SERVER_GAS_EXEC_URL,
     autoSyncEnabled: true,
     lastSyncStatus: null,
+    lastHydrationStatus: null,
   };
 }
 
@@ -93,6 +108,11 @@ function saveState() {
 
 export function getGasBridgeState(): GasBridgeServerState {
   return bridgeState;
+}
+
+export function setGasHydrationStatus(status: GasHydrationStatus): void {
+  bridgeState.lastHydrationStatus = status;
+  saveState();
 }
 
 export function updateGasBridgeConfig(updates: {
@@ -192,6 +212,68 @@ export async function pingGasBridge(): Promise<GasBridgeSyncStatus> {
     bridgeState.lastSyncStatus = status;
     saveState();
     return status;
+  }
+}
+
+export async function fetchGasHydrationState(): Promise<{
+  ok: boolean;
+  data?: {
+    spreadsheetName?: string;
+    exportedAt?: string;
+    members?: any[];
+    monolineNodes?: any[];
+    binaryNodes?: any[];
+    contacts?: any[];
+    contactTrackings?: any[];
+  };
+  error?: string;
+}> {
+  const url = bridgeState.gasWebAppUrl;
+  const check = validateGasExecUrl(url);
+  if (!check.valid) {
+    return { ok: false, error: check.error || 'GAS /exec 網址未設定' };
+  }
+
+  const target = `${check.normalized}${check.normalized.includes('?') ? '&' : '?'}action=exportHydrationState`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch(target, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      return { ok: false, error: `GAS 回讀回應 HTTP ${res.status}` };
+    }
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return {
+        ok: false,
+        error: 'GAS 端點回傳非 JSON（請更新最新版 Code.gs 並建立新版本部署以支援開機回讀）',
+      };
+    }
+
+    if (!parsed || parsed.success === false || !parsed.data || !Array.isArray(parsed.data.members)) {
+      return {
+        ok: false,
+        error:
+          parsed?.error ||
+          'GAS 尚未支援 exportHydrationState（請貼上最新版 Code.gs 並建立新版本部署）',
+      };
+    }
+
+    return { ok: true, data: parsed.data };
+  } catch (err: any) {
+    clearTimeout(timer);
+    return { ok: false, error: `開機回讀 GAS 逾時或失敗：${err?.message || '網路異常'}` };
   }
 }
 

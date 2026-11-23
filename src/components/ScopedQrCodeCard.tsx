@@ -5,12 +5,14 @@
 
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { QrCode, Download, Copy, Check, Smartphone, Camera, ShieldCheck } from 'lucide-react';
+import { QrCode, Download, Copy, Check, Smartphone, Camera, ShieldCheck, UserPlus } from 'lucide-react';
 import {
+  buildPublicJoinUrl,
   buildRolePortalUrl,
   detectLineInAppBrowser,
   EXTERNAL_BASE_URL_UPDATED_EVENT,
   getSavedExternalBaseUrl,
+  OFFICIAL_SHARED_APP_URL,
 } from '../services/rolePortalUrlService';
 import { apiIssueQrPassToken } from '../services/confidentialApiClient';
 
@@ -23,13 +25,14 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
   memberMid,
   memberName,
 }) => {
+  const [qrMode, setQrMode] = useState<'join' | 'login'>('join');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
   const [lineExternalBrowser, setLineExternalBrowser] = useState<boolean>(true);
   const [includeQuickLoginPass, setIncludeQuickLoginPass] = useState<boolean>(true);
   const [signedQrToken, setSignedQrToken] = useState<string>('');
   const [longPressPosterUrl, setLongPressPosterUrl] = useState<string>('');
-  const [useGasExecUrl, setUseGasExecUrl] = useState<boolean>(true);
+  const [useGasExecUrl, setUseGasExecUrl] = useState<boolean>(false);
   const [savedExternalBase, setSavedExternalBase] = useState<string>(() => getSavedExternalBaseUrl());
 
   useEffect(() => {
@@ -38,15 +41,11 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     return () => window.removeEventListener(EXTERNAL_BASE_URL_UPDATED_EVENT, onBaseUpdated);
   }, []);
 
-  const origin = useGasExecUrl
-    ? savedExternalBase
-    : typeof window !== 'undefined'
-      ? window.location.origin
-      : savedExternalBase;
+  const origin = useGasExecUrl ? savedExternalBase : OFFICIAL_SHARED_APP_URL;
 
   useEffect(() => {
     let cancelled = false;
-    if (!includeQuickLoginPass) {
+    if (qrMode !== 'login' || !includeQuickLoginPass) {
       setSignedQrToken('');
       return;
     }
@@ -60,15 +59,21 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [includeQuickLoginPass, memberMid]);
+  }, [qrMode, includeQuickLoginPass, memberMid]);
 
-  const baseMemberUrl = buildRolePortalUrl('MEMBER', memberMid, origin, {
-    device: 'mobile',
-    openExternalBrowser: lineExternalBrowser,
-  });
+  const baseMemberUrl =
+    qrMode === 'join'
+      ? buildPublicJoinUrl(memberMid, origin, {
+          device: 'mobile',
+          openExternalBrowser: lineExternalBrowser,
+        })
+      : buildRolePortalUrl('MEMBER', memberMid, origin, {
+          device: 'mobile',
+          openExternalBrowser: lineExternalBrowser,
+        });
 
   const memberMobileUrl =
-    includeQuickLoginPass && signedQrToken
+    qrMode === 'login' && includeQuickLoginPass && signedQrToken
       ? `${baseMemberUrl}&qrToken=${encodeURIComponent(signedQrToken)}`
       : baseMemberUrl;
 
@@ -111,32 +116,46 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     ctx.fillStyle = '#0F172A';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.fillStyle = '#0EA5E9';
+    ctx.fillStyle = qrMode === 'join' ? '#10B981' : '#0EA5E9';
     ctx.fillRect(0, 0, canvas.width, 14);
 
-    // LINE camera pill
+    // Top badge
     ctx.fillStyle = '#064E3B';
     ctx.beginPath();
-    ctx.roundRect(175, 48, 370, 38, 19);
+    ctx.roundRect(155, 48, 410, 38, 19);
     ctx.fill();
     ctx.fillStyle = '#34D399';
     ctx.font = 'bold 18px "Noto Sans TC", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(
-      signedQrToken
-        ? 'LINE / 鏡頭影像快速登入專用憑證'
-        : 'LINE 掃一掃 / 手機相機直接拍攝進入',
+      qrMode === 'join'
+        ? '免登入掃碼入會 · 免費開通 AI 軟體 1+1'
+        : signedQrToken
+          ? 'LINE / 鏡頭影像快速登入專用憑證'
+          : 'LINE 掃一掃 / 手機相機直接拍攝進入',
       canvas.width / 2,
       74
     );
 
     ctx.fillStyle = '#F8FAFC';
     ctx.font = 'bold 34px "Noto Sans TC", sans-serif';
-    ctx.fillText(`${memberName} 專屬雲端服務入口`, canvas.width / 2, 134);
+    ctx.fillText(
+      qrMode === 'join'
+        ? `${memberName} 邀請您免費體驗 AI 軟體`
+        : `${memberName} 專屬雲端服務入口`,
+      canvas.width / 2,
+      134
+    );
 
     ctx.fillStyle = '#94A3B8';
     ctx.font = '20px "Noto Sans TC", sans-serif';
-    ctx.fillText(`推薦 / 會員編號：${memberMid}`, canvas.width / 2, 174);
+    ctx.fillText(
+      qrMode === 'join'
+        ? `直推推薦人編號：${memberMid}（掃碼自動綁定）`
+        : `推薦 / 會員編號：${memberMid}`,
+      canvas.width / 2,
+      174
+    );
 
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
@@ -154,9 +173,11 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     ctx.fillStyle = '#E2E8F0';
     ctx.font = 'bold 22px "Noto Sans TC", sans-serif';
     ctx.fillText(
-      signedQrToken
-        ? '登入頁開啟鏡頭掃描本圖卡即可免密碼快速登入'
-        : '開啟 LINE 相機或手機鏡頭掃碼登入',
+      qrMode === 'join'
+        ? '掃碼填寫姓名與手機，立即領取 30 天免費體驗'
+        : signedQrToken
+          ? '登入頁開啟鏡頭掃描本圖卡即可免密碼快速登入'
+          : '開啟 LINE 相機或手機鏡頭掃碼登入',
       canvas.width / 2,
       718
     );
@@ -169,11 +190,13 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     ctx.fillStyle = '#475569';
     ctx.font = '16px "Noto Sans TC", sans-serif';
     ctx.fillText(
-      signedQrToken
-        ? '含伺服器 HMAC-SHA256 加密簽章（30 天有效）'
-        : lineExternalBrowser
-          ? 'LINE 掃碼自動啟動 Safari / Chrome 穩定版面'
-          : '支援 LINE 內建視窗與行動瀏覽器開啟',
+      qrMode === 'join'
+        ? '同步開通通訊錄 CRM + 活動行銷 + 個人預約系統'
+        : signedQrToken
+          ? '含伺服器 HMAC-SHA256 加密簽章（30 天有效）'
+          : lineExternalBrowser
+            ? 'LINE 掃碼自動啟動 Safari / Chrome 穩定版面'
+            : '支援 LINE 內建視窗與行動瀏覽器開啟',
       canvas.width / 2,
       820
     );
@@ -193,7 +216,7 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
 
     const a = document.createElement('a');
     a.href = posterDataUrl;
-    a.download = `Member_QR_${memberMid}.png`;
+    a.download = qrMode === 'join' ? `Join_QR_${memberMid}.png` : `Member_QR_${memberMid}.png`;
     a.click();
   };
 
@@ -201,7 +224,11 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row items-center gap-5">
       <div className="bg-white p-2.5 rounded-xl shrink-0 shadow-md">
         {qrDataUrl ? (
-          <img src={qrDataUrl} alt={`${memberMid} LINE 掃碼專用 QR Code`} className="w-36 h-36 object-contain" />
+          <img
+            src={qrDataUrl}
+            alt={qrMode === 'join' ? `${memberMid} 推薦入會 QR Code` : `${memberMid} 快速登入 QR Code`}
+            className="w-36 h-36 object-contain"
+          />
         ) : (
           <div className="w-36 h-36 flex items-center justify-center text-xs text-slate-500">
             載入中...
@@ -210,11 +237,48 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
       </div>
 
       <div className="flex-1 min-w-0 space-y-3 text-center sm:text-left">
+        {/* Mode Switcher */}
+        <div className="inline-flex p-1 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+          <button
+            type="button"
+            onClick={() => setQrMode('join')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-colors cursor-pointer ${
+              qrMode === 'join'
+                ? 'bg-emerald-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>推薦新夥伴免登入入會</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQrMode('login')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold transition-colors cursor-pointer ${
+              qrMode === 'login'
+                ? 'bg-sky-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <QrCode className="w-3.5 h-3.5" />
+            <span>我的快速登入 QR</span>
+          </button>
+        </div>
+
         <div>
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
             <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <QrCode className="w-4 h-4 text-sky-400" />
-              <span>我的 LINE 攝影 / 影像識別快速登入 QR Code</span>
+              {qrMode === 'join' ? (
+                <>
+                  <UserPlus className="w-4 h-4 text-emerald-400" />
+                  <span>專屬推薦入會 QR Code（免登入直接開通 1+1）</span>
+                </>
+              ) : (
+                <>
+                  <QrCode className="w-4 h-4 text-sky-400" />
+                  <span>我的 LINE 攝影 / 影像識別快速登入 QR Code</span>
+                </>
+              )}
             </h4>
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#06C755]/20 border border-[#06C755]/40 text-[#4ade80] text-[10px] font-bold">
               <Camera className="w-3 h-3" />
@@ -222,21 +286,33 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            使用 LINE 相機拍攝或登入頁鏡頭影像識別掃碼，即可帶入您的編號 (<span className="font-mono text-sky-300">{memberMid}</span>) 並快速進入個人工作台。
+            {qrMode === 'join' ? (
+              <>
+                新夥伴用手機掃描此 QR Code，免登入即可自行填寫姓名與手機免費開通 1+1，系統會自動綁定您（
+                <span className="font-mono text-emerald-300">{memberMid}</span>）為直推推薦人並寫入試算表。
+              </>
+            ) : (
+              <>
+                使用 LINE 相機拍攝或登入頁鏡頭影像識別掃碼，即可帶入您的編號 (
+                <span className="font-mono text-sky-300">{memberMid}</span>) 並快速進入個人工作台。
+              </>
+            )}
           </p>
         </div>
 
         <div className="flex flex-col gap-1.5 items-center sm:items-start">
-          <label className="inline-flex items-center gap-2 text-xs text-emerald-300 font-medium cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={includeQuickLoginPass}
-              onChange={(e) => setIncludeQuickLoginPass(e.target.checked)}
-              className="rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
-            />
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>附加後端加密簽章（於登入頁鏡頭拍攝可免打密碼快速登入）</span>
-          </label>
+          {qrMode === 'login' && (
+            <label className="inline-flex items-center gap-2 text-xs text-emerald-300 font-medium cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeQuickLoginPass}
+                onChange={(e) => setIncludeQuickLoginPass(e.target.checked)}
+                className="rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
+              />
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>附加後端加密簽章（於登入頁鏡頭拍攝可免打密碼快速登入）</span>
+            </label>
+          )}
 
           <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
             <input
@@ -245,7 +321,7 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
               onChange={(e) => setLineExternalBrowser(e.target.checked)}
               className="rounded border-slate-700 bg-slate-950 text-[#06C755] focus:ring-[#06C755]"
             />
-            <span>LINE 掃碼後自動切換 Safari / Chrome 開啟（推薦：登入狀態最穩定）</span>
+            <span>LINE 掃碼後自動切換 Safari / Chrome 開啟（推薦：畫面最穩定）</span>
           </label>
 
           <label className="inline-flex items-center gap-2 text-xs text-sky-300 cursor-pointer select-none">
@@ -255,7 +331,7 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
               onChange={(e) => setUseGasExecUrl(e.target.checked)}
               className="rounded border-slate-700 bg-slate-950 text-sky-500 focus:ring-sky-500"
             />
-            <span>使用指定 GAS /exec 網址（取消勾選可改用目前瀏覽器網域）</span>
+            <span>改用 GAS /exec 轉接網址（預設已直接綁定正式主機 {OFFICIAL_SHARED_APP_URL}）</span>
           </label>
         </div>
 
@@ -271,7 +347,7 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-xs font-semibold text-white cursor-pointer transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>下載 LINE 掃碼圖卡 PNG</span>
+            <span>{qrMode === 'join' ? '下載推薦入會立牌 PNG' : '下載 LINE 掃碼圖卡 PNG'}</span>
           </button>
           <button
             type="button"
@@ -306,3 +382,4 @@ export const ScopedQrCodeCard: React.FC<ScopedQrCodeCardProps> = ({
     </div>
   );
 };
+

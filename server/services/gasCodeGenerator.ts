@@ -38,7 +38,9 @@ var GLOBAL_CONFIG = {
   BACKUP_DRIVE_FOLDER_NAME: "AIS_ERP_核心帳務每日午夜備份庫",
   SHEET_BACKUP_MANIFEST: "_SYS_備份與還原紀錄",
   BACKUP_RETENTION_DAYS: 30,
-  FRONTEND_APP_URL: "https://ais-pre-fmr4xyg7okjnqrqpw3sdig-615655728389.asia-northeast1.run.app"
+  TIMEZONE: "Asia/Taipei",
+  DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
+  FRONTEND_APP_URL: "https://erp-saas-system.onrender.com"
 };
 
 // ================= Google Sheets 模組配置 (通訊錄與活動) =================
@@ -82,6 +84,9 @@ function doPost(e) {
         break;
       case "getSystemStats":
         result = getSystemStats();
+        break;
+      case "exportHydrationState":
+        result = exportHydrationState();
         break;
       case "upsertTodo":
         result = upsertMemberTodo(requestData.memberMid, requestData.data);
@@ -179,6 +184,8 @@ function doGet(e) {
     var result = {};
     if (action === "getSystemStats") {
       result = getSystemStats();
+    } else if (action === "exportHydrationState") {
+      result = exportHydrationState();
     } else if (action === "initSheets") {
       result = setupDatabaseSheets();
     } else {
@@ -188,7 +195,7 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
 
-  var forwardKeys = ["portal", "id", "device", "openExternalBrowser", "qrToken"];
+  var forwardKeys = ["portal", "id", "sponsor", "ref", "device", "openExternalBrowser", "qrToken"];
   var qs = [];
   for (var i = 0; i < forwardKeys.length; i++) {
     var k = forwardKeys[i];
@@ -239,6 +246,13 @@ function doGet(e) {
  */
 function setupDatabaseSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    ss.setSpreadsheetTimeZone(GLOBAL_CONFIG.TIMEZONE);
+  } catch (e) {
+    Logger.log("setSpreadsheetTimeZone Warning: " + e.toString());
+  }
+  var nowTw = formatTaiwanDateTime_(new Date());
+  var permanentExpireTw = "2099-12-31 23:59:59";
   
   // 1. 會員主檔
   var sMembers = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_MEMBERS);
@@ -251,11 +265,12 @@ function setupDatabaseSheets() {
     sMembers.getRange(1, 1, 1, 12).setBackground("#1E293B").setFontColor("#FFFFFF").setFontWeight("bold");
     
     // 初始化旗艦領袖
-    sMembers.appendRow([
+    appendRowWithPlainTextCols_(sMembers, [
       GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "第6代旗艦領袖 (總直推錨點)", "0988-001-113", "A123***113",
-      "A-00000001", "S-HQ-01", "EDU-HQ-01", new Date(), new Date(2099, 11, 31), 0, "C-00001113", "C-25000001"
-    ]);
+      "A-00000001", "S-HQ-01", "EDU-HQ-01", nowTw, permanentExpireTw, 0, "C-00001113", "C-25000001"
+    ], [3, 4, 8, 9]);
   }
+  sMembers.getRange("C:C").setNumberFormat("@");
 
   // 2. 單軌公排節點表
   var sMono = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_MONOLINE);
@@ -281,7 +296,7 @@ function setupDatabaseSheets() {
     sBi.appendRow([
       GLOBAL_CONFIG.BINARY_ROOT_NODE_ID, GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "雙軌定海神針 (Binary Root)",
       "SYSTEM_ROOT", "ROOT", 0, "C-25000002", "C-25000003",
-      GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "HQ_LOCKED", true, new Date(2099, 11, 31), 0
+      GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "HQ_LOCKED", true, permanentExpireTw, 0
     ]);
   }
 
@@ -312,6 +327,7 @@ function setupDatabaseSheets() {
     sContactM.appendRow(cfgContactM.headers);
     sContactM.getRange(1, 1, 1, cfgContactM.headers.length).setBackground("#0284C7").setFontColor("#FFFFFF").setFontWeight("bold");
   }
+  sContactM.getRange("D:E").setNumberFormat("@");
 
   // 7. 聯繫紀錄 (CONTACT_T / CT-)
   var cfgContactT = SHEET_CONFIG['CONTACT_T'];
@@ -360,6 +376,7 @@ function setupDatabaseSheets() {
  * 新會員開通 AI 軟體 1+1：自動核發單軌公排與雙軌卡位，並自動同步寫入通訊主檔與聯繫紀錄
  */
 function processNewMemberRegistration(memberData) {
+  memberData = memberData || {};
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetMembers = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MEMBERS);
   var sheetMono = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MONOLINE);
@@ -367,45 +384,79 @@ function processNewMemberRegistration(memberData) {
   var sheetContactM = ss.getSheetByName(SHEET_CONFIG['CONTACT_M'].sheet);
   var sheetContactT = ss.getSheetByName(SHEET_CONFIG['CONTACT_T'].sheet);
 
-  // 1. 自動核發單軌 MID (A-碼) 與單軌節點 ID (C-碼) - 新會員入會從 A-00001 建檔
+  // 1. 優先採用網頁伺服器核發的權威 MID / 單軌節點 ID（確保兩邊編號 100% 一致），若單獨在 GAS 呼叫則自動起編
   var lastRowMembers = sheetMembers ? sheetMembers.getLastRow() : 1;
-  // 表頭佔第 1 列，若為首位新會員 (lastRowMembers <= 1)，序號為 1 -> A-00001
   var sequenceNumber = (lastRowMembers <= 1) ? 1 : lastRowMembers;
-  var monolineMid = "A-" + padZero(sequenceNumber, 5);
-  var monolineNodeId = "C-" + padZero(sequenceNumber, 5);
-  var prevMonolineNodeId = (sequenceNumber === 1) ? "HQ_ROOT" : ("C-" + padZero(sequenceNumber - 1, 5));
+  var monolineMid = memberData.mid ? String(memberData.mid).trim().toUpperCase() : ("A-" + padZero(sequenceNumber, 5));
+  var monolineNodeId = memberData.monolineNodeId ? String(memberData.monolineNodeId).trim().toUpperCase() : ("C-" + padZero(sequenceNumber, 5));
+  var prevMonolineNodeId = memberData.monolineParentId
+    ? String(memberData.monolineParentId).trim()
+    : ((sequenceNumber === 1) ? "HQ_ROOT" : ("C-" + padZero(sequenceNumber - 1, 5)));
+  var monolineDepth = (typeof memberData.monolineDepth === "number" && !isNaN(memberData.monolineDepth))
+    ? memberData.monolineDepth
+    : sequenceNumber;
 
-  var now = new Date();
-  var trialExpireDate = new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000));
-  var sponsorMid = memberData.sponsorMid || GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
+  var now = memberData.registeredAt ? parseTaiwanDate_(memberData.registeredAt) : new Date();
+  if (isNaN(now.getTime())) now = new Date();
+  var trialExpireDate = memberData.trialExpiresAt
+    ? parseTaiwanDate_(memberData.trialExpiresAt)
+    : new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000));
+  if (isNaN(trialExpireDate.getTime())) {
+    trialExpireDate = new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000));
+  }
+  var nowTw = formatTaiwanDateTime_(now);
+  var trialExpireTw = formatTaiwanDateTime_(trialExpireDate);
+
+  var memberName = String(memberData.name || monolineMid).trim();
+  var sponsorMid = memberData.sponsorMid ? String(memberData.sponsorMid).trim().toUpperCase() : GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
+  var phoneText = normalizePhoneText_(memberData.phone || "0912345678");
+  var telText = memberData.tel ? String(memberData.tel).trim() : "02-88887777";
+  var idMasked = memberData.idNumberMasked ? String(memberData.idNumberMasked).trim() : "A123***456";
+  var lineText = memberData.line ? String(memberData.line).trim() : (memberName + "_line");
+  var emailText = memberData.email ? String(memberData.email).trim() : (monolineMid.toLowerCase() + "@ai-saas.tw");
+  var addressText = memberData.address ? String(memberData.address).trim() : "台灣生活圈";
+  var storeId = memberData.storeId ? String(memberData.storeId).trim() : "S-TAIPEI-01";
+  var centerId = memberData.centerId ? String(memberData.centerId).trim() : "EDU-GLOBAL-01";
 
   // 2. 【第一組 AI 軟體節點 (單軌公排互助)】
   if (sheetMono) {
-    sheetMono.appendRow([
+    appendRowWithPlainTextCols_(sheetMono, [
       monolineNodeId,
       monolineMid,
-      memberData.name + " (第1組AI-單軌體驗)",
+      memberName + " (第1組AI-單軌體驗)",
       prevMonolineNodeId,
-      sequenceNumber,
+      monolineDepth,
       sponsorMid,
       "TRIAL_ACTIVE",
       false,
-      trialExpireDate,
+      trialExpireTw,
       0
-    ]);
+    ], [9]);
   }
 
   // 3. 【第二組 AI 軟體節點 (雙軌二元樹卡位分身)】
-  // BFS 自動尋找雙軌第一個空缺位置
-  var placement = findNextAvailableBinaryPlacement(GLOBAL_CONFIG.BINARY_ROOT_NODE_ID);
-  var binarySeqNumber = 25000514 + (lastRowMembers - 1);
-  var binaryNodeId = "C-" + padZero(binarySeqNumber, 8);
+  // 若網頁伺服器已提供權威雙軌節點 ID 與安置父節點，100% 沿用；否則由 GAS BFS 自動尋找空位
+  var placement = null;
+  if (memberData.binaryParentId) {
+    placement = {
+      parentId: String(memberData.binaryParentId).trim().toUpperCase(),
+      position: String(memberData.binaryPosition || "L").trim().toUpperCase(),
+      depth: (typeof memberData.binaryDepth === "number" && !isNaN(memberData.binaryDepth)) ? memberData.binaryDepth : 1,
+      parentRowIndex: null
+    };
+  } else {
+    placement = findNextAvailableBinaryPlacement(GLOBAL_CONFIG.BINARY_ROOT_NODE_ID);
+  }
+  var binarySeqNumber = 25000514 + Math.max(0, lastRowMembers - 1);
+  var binaryNodeId = memberData.binaryNodeId
+    ? String(memberData.binaryNodeId).trim().toUpperCase()
+    : ("C-" + padZero(binarySeqNumber, 8));
 
   if (sheetBi) {
-    sheetBi.appendRow([
+    appendRowWithPlainTextCols_(sheetBi, [
       binaryNodeId,
       monolineMid, // 同一會員享有雙軌卡位
-      memberData.name + " (第2組AI-雙軌分身)",
+      memberName + " (第2組AI-雙軌分身)",
       placement.parentId,
       placement.position,
       placement.depth,
@@ -414,86 +465,97 @@ function processNewMemberRegistration(memberData) {
       sponsorMid,
       "TRIAL_ACTIVE",
       false,
-      trialExpireDate,
+      trialExpireTw,
       0
-    ]);
+    ], [12]);
 
-    // 直接利用 placement.parentRowIndex O(1) 更新父節點指標，省去第二次全表讀取
+    // 更新父節點左右子指標
     updateParentBinaryLink(placement.parentId, placement.position, binaryNodeId, placement.parentRowIndex);
   }
 
-  // 4. 寫入會員主檔
+  // 4. 寫入會員主檔（手機、身分證號與台灣時間欄位皆強制純文字寫入，保留開頭 0）
   if (sheetMembers) {
-    sheetMembers.appendRow([
+    appendRowWithPlainTextCols_(sheetMembers, [
       monolineMid,
-      memberData.name,
-      memberData.phone || "0912345678",
-      memberData.idNumberMasked || "A123***456",
+      memberName,
+      phoneText,
+      idMasked,
       sponsorMid,
-      memberData.storeId || "S-TAIPEI-01",
-      memberData.centerId || "EDU-GLOBAL-01",
-      now,
-      trialExpireDate,
+      storeId,
+      centerId,
+      nowTw,
+      trialExpireTw,
       0, // 零錢池初始為 0
       monolineNodeId,
       binaryNodeId
-    ]);
+    ], [3, 4, 8, 9]);
   }
 
-  // 5. 自動寫入通訊主檔 (CONTACT_M / CM-)
-  var contactId = "CM-" + padZero(sequenceNumber, 5);
+  // 5. 自動寫入通訊主檔 (CONTACT_M / CM-) - 全欄位落盤且手機/市話強制純文字
+  var contactId = memberData.contactId ? String(memberData.contactId).trim().toUpperCase() : ("CM-" + padZero(sequenceNumber, 5));
   var userPhoto = memberData.photoUrl || "https://images.unsplash.com/photo-1534528741775?w=200&auto=format&fit=crop&q=80";
   if (sheetContactM) {
-    sheetContactM.appendRow([
+    appendRowWithPlainTextCols_(sheetContactM, [
       contactId,
       "開通AI軟體1+1",
-      memberData.name,
-      memberData.phone || "0912345678",
-      memberData.tel || "02-88887777",
-      memberData.line || (memberData.name + "_line"),
-      memberData.email || (monolineMid.toLowerCase() + "@ai-saas.tw"),
-      memberData.address || "台灣生活圈",
+      memberName,
+      phoneText,
+      telText,
+      lineText,
+      emailText,
+      addressText,
       userPhoto,
-      now
-    ]);
+      nowTw
+    ], [4, 5, 6, 10]);
   }
 
-  // 6. 自動寫入首筆聯繫紀錄 (CONTACT_T / CT-)
-  var trackingId = "CT-" + padZero(sequenceNumber, 5);
+  // 6. 自動寫入首筆聯繫紀錄 (CONTACT_T / CT-) - 完整保存表單填寫的洽談內容與下一步計畫
+  var trackingId = memberData.trackingId ? String(memberData.trackingId).trim().toUpperCase() : ("CT-" + padZero(sequenceNumber, 5));
+  var discussionText = memberData.discussionContent
+    ? String(memberData.discussionContent).trim()
+    : ("新會員開通 AI 軟體 1+1 (第 1 組單軌體驗 " + monolineNodeId + " + 第 2 組雙軌卡位 " + binaryNodeId + "，贈送 30 天體驗)");
+  var nextPlanText = memberData.nextStepPlan
+    ? String(memberData.nextStepPlan).trim()
+    : "引導體驗 AI 軟體功能並邀約參加 EM-00001 實體啟航說明會";
   if (sheetContactT) {
-    sheetContactT.appendRow([
+    appendRowWithPlainTextCols_(sheetContactT, [
       trackingId,
       "開通體驗",
-      memberData.name,
-      Utilities.formatDate(now, "Asia/Taipei", "yyyy-MM-dd"),
+      memberName,
+      Utilities.formatDate(now, GLOBAL_CONFIG.TIMEZONE, "yyyy-MM-dd"),
       "線上開通",
-      "新會員開通 AI 軟體 1+1 (第 1 組單軌體驗 " + monolineNodeId + " + 第 2 組雙軌卡位 " + binaryNodeId + "，贈送 30 天體驗)",
-      "引導體驗 AI 軟體功能並邀約參加 EM-00001 實體啟航說明會",
+      discussionText,
+      nextPlanText,
       userPhoto,
-      now
-    ]);
+      nowTw
+    ], [4, 9]);
   }
 
   tryDualWriteMemberToMysql_({
     mid: monolineMid,
-    name: memberData.name,
-    phone: memberData.phone || "0912345678",
-    idNumberMasked: memberData.idNumberMasked || "A123***456",
+    name: memberName,
+    phone: phoneText,
+    idNumberMasked: idMasked,
     sponsorMid: sponsorMid,
-    storeId: memberData.storeId || "S-TAIPEI-01",
-    centerId: memberData.centerId || "EDU-GLOBAL-01",
+    storeId: storeId,
+    centerId: centerId,
     registeredAt: now,
     trialExpiresAt: trialExpireDate,
     monolineNodeId: monolineNodeId,
     binaryNodeId: binaryNodeId
   });
 
-  // 7. 自動在 Google Drive 為該位新會員建立獨立雲端資料夾與專屬 Google 試算表
-  var cloudVault = provisionMemberCloudWorkspace(monolineMid, memberData.name, null);
+  // 7. 自動在 Google Drive 為該位新會員建立獨立雲端資料夾與專屬 Google 試算表（若尚未授權 Drive 也不阻斷試算表寫入）
+  var cloudVault = { folderId: "", folderUrl: "", spreadsheetId: "", spreadsheetUrl: "" };
+  try {
+    cloudVault = provisionMemberCloudWorkspace(monolineMid, memberName, null);
+  } catch (vaultErr) {
+    Logger.log("provisionMemberCloudWorkspace Warning: " + vaultErr.toString());
+  }
 
   // 8. Write-Through 寫入穿透：立即更新臨時索引並使統計緩存失效
   upsertTempIndexRecord_("IDX:MEMBER:" + monolineMid, "MEMBER", monolineMid, monolineMid, GLOBAL_CONFIG.SHEET_MEMBERS, (sheetMembers ? sheetMembers.getLastRow() : 2), {
-    mid: monolineMid, name: memberData.name, monolineNodeId: monolineNodeId, binaryNodeId: binaryNodeId
+    mid: monolineMid, name: memberName, monolineNodeId: monolineNodeId, binaryNodeId: binaryNodeId
   });
   invalidateHotCacheKeys(["SYS_STATS", "SUBTREE:" + placement.parentId, "SUBTREE:" + GLOBAL_CONFIG.BINARY_ROOT_NODE_ID + ":3"]);
 
@@ -505,7 +567,8 @@ function processNewMemberRegistration(memberData) {
       binaryNodeId: binaryNodeId,
       placedParentId: placement.parentId,
       placedPosition: placement.position,
-      trialExpiresAt: trialExpireDate,
+      registeredAt: nowTw,
+      trialExpiresAt: trialExpireTw,
       contactId: contactId,
       trackingId: trackingId,
       cloudFolderId: cloudVault.folderId,
@@ -513,7 +576,7 @@ function processNewMemberRegistration(memberData) {
       cloudSpreadsheetId: cloudVault.spreadsheetId,
       cloudSpreadsheetUrl: cloudVault.spreadsheetUrl
     },
-    message: "成功開通新會員 AI 軟體 1+1！單軌公排 (" + monolineNodeId + ")、雙軌卡位 (" + binaryNodeId + ")，已同步建檔於通訊主檔 (" + contactId + ")、聯繫紀錄 (" + trackingId + ")，並自動生成會員專屬雲端資料夾與 Google 試算表。"
+    message: "成功開通新會員 AI 軟體 1+1！會員編號 (" + monolineMid + ")、單軌公排 (" + monolineNodeId + ")、雙軌卡位 (" + binaryNodeId + ")，已同步建檔於通訊主檔 (" + contactId + ") 與聯繫紀錄 (" + trackingId + ")。"
   };
 }
 
@@ -617,30 +680,50 @@ function allocateSoftwareBinaryNode(data) {
     throw new Error("找不到雙軌二元樹工作表：" + GLOBAL_CONFIG.SHEET_BINARY);
   }
 
-  var memberMid = (data && data.memberMid) ? data.memberMid : GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
-  var softwareTitle = (data && data.softwareTitle) ? data.softwareTitle : "AI 雙軌模組";
-  var sponsorMid = GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
+  var memberMid = (data && data.memberMid) ? String(data.memberMid).trim().toUpperCase() : GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
+  var softwareTitle = (data && data.softwareTitle) ? String(data.softwareTitle).trim() : "AI 雙軌模組";
+  var sponsorMid = (data && data.sponsorMid) ? String(data.sponsorMid).trim().toUpperCase() : GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
   var memberName = memberMid;
 
   if (sheetMembers && sheetMembers.getLastRow() >= 2) {
     // 僅讀取 A:E (MID, 姓名, 手機, 身分證, 推薦人)
     var mData = sheetMembers.getRange(2, 1, sheetMembers.getLastRow() - 1, 5).getValues();
     for (var i = 0; i < mData.length; i++) {
-      if (mData[i][0] === memberMid) {
+      if (String(mData[i][0]).trim().toUpperCase() === memberMid) {
         memberName = mData[i][1] || memberMid;
-        sponsorMid = mData[i][4] || GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
+        if (!data || !data.sponsorMid) {
+          sponsorMid = mData[i][4] || GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID;
+        }
         break;
       }
     }
   }
 
-  var placement = findNextAvailableBinaryPlacement(GLOBAL_CONFIG.BINARY_ROOT_NODE_ID);
-  var binaryNodeId = "C-" + padZero((placement.maxCounter || 25000514) + 1, 8);
+  var placement = (data && data.parentId)
+    ? {
+        parentId: String(data.parentId).trim().toUpperCase(),
+        position: String(data.position || "L").trim().toUpperCase(),
+        depth: (typeof data.depth === "number" && !isNaN(data.depth)) ? data.depth : 1,
+        parentRowIndex: null,
+        maxCounter: 25000514
+      }
+    : findNextAvailableBinaryPlacement(GLOBAL_CONFIG.BINARY_ROOT_NODE_ID);
+  var binaryNodeId = (data && data.binaryNodeId)
+    ? String(data.binaryNodeId).trim().toUpperCase()
+    : ("C-" + padZero((placement.maxCounter || 25000514) + 1, 8));
   var now = new Date();
-  var expireDate = new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000));
-  var initialStatus = (data && data.executeSettlement) ? "ACTIVE_RENEWED" : "TRIAL_ACTIVE";
+  var expireDate = (data && data.expiresAt)
+    ? parseTaiwanDate_(data.expiresAt)
+    : new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000));
+  if (isNaN(expireDate.getTime())) {
+    expireDate = new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000));
+  }
+  var expireTw = formatTaiwanDateTime_(expireDate);
+  var initialStatus = (data && data.status)
+    ? String(data.status).trim()
+    : ((data && data.executeSettlement) ? "ACTIVE_RENEWED" : "TRIAL_ACTIVE");
 
-  sheetBi.appendRow([
+  appendRowWithPlainTextCols_(sheetBi, [
     binaryNodeId,
     memberMid,
     memberName + " (" + softwareTitle + ")",
@@ -652,9 +735,9 @@ function allocateSoftwareBinaryNode(data) {
     sponsorMid,
     initialStatus,
     false,
-    expireDate,
+    expireTw,
     0
-  ]);
+  ], [12]);
 
   updateParentBinaryLink(placement.parentId, placement.position, binaryNodeId, placement.parentRowIndex);
 
@@ -692,6 +775,7 @@ function execute100PointsClosedLoopSettlement(nodeId, amount) {
   var sheetBonus = ss.getSheetByName(GLOBAL_CONFIG.SHEET_BONUSES);
 
   var now = new Date();
+  var nowTw = formatTaiwanDateTime_(now);
   var txnId = "TXN-" + now.getTime();
 
   // 1. 查找該節點與會員資訊 (只讀 A:L 12 欄)
@@ -707,7 +791,7 @@ function execute100PointsClosedLoopSettlement(nodeId, amount) {
         sponsorMid: biData[i][8],
         status: biData[i][9],
         locked: biData[i][10],
-        expiresAt: new Date(biData[i][11])
+        expiresAt: parseTaiwanDate_(biData[i][11])
       };
       break;
     }
@@ -734,7 +818,7 @@ function execute100PointsClosedLoopSettlement(nodeId, amount) {
       status = "CIRCUIT_BREAKER_HALF";
     }
     totalSponsorPoints += award;
-    bonusRows.push([txnId, "15代推薦分紅", curSponsorMid, gen, award, status, now]);
+    bonusRows.push([txnId, "15代推薦分紅", curSponsorMid, gen, award, status, nowTw]);
     curSponsorMid = GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID; // 向上溯源
   }
 
@@ -750,7 +834,7 @@ function execute100PointsClosedLoopSettlement(nodeId, amount) {
       pStatus = "CIRCUIT_BREAKER_HALF";
     }
     totalPlacementPoints += pAward;
-    bonusRows.push([txnId, "15代雙軌安置分紅", curParentId || "HQ_ROOT", pGen, pAward, pStatus, now]);
+    bonusRows.push([txnId, "15代雙軌安置分紅", curParentId || "HQ_ROOT", pGen, pAward, pStatus, nowTw]);
     curParentId = GLOBAL_CONFIG.BINARY_ROOT_NODE_ID;
   }
 
@@ -775,7 +859,7 @@ function execute100PointsClosedLoopSettlement(nodeId, amount) {
   sheetSet.appendRow([
     txnId, nodeId, nodeInfo.mid, amount,
     totalSponsorPoints, totalPlacementPoints, totalStorePoints, totalCenterPoints,
-    abanyPoints, hqOpsPoints, publicSafetyPoints, totalCheck, now
+    abanyPoints, hqOpsPoints, publicSafetyPoints, totalCheck, nowTw
   ]);
 
   tryDualWriteSettlementToMysql_({
@@ -820,6 +904,147 @@ function padZero(num, size) {
   var s = num + "";
   while (s.length < size) s = "0" + s;
   return s;
+}
+
+/**
+ * 輔助工具：統一格式化為台灣時間 (Asia/Taipei, GMT+8) "yyyy-MM-dd HH:mm:ss"
+ */
+function formatTaiwanDateTime_(dateObj) {
+  var d = (dateObj instanceof Date) ? dateObj : parseTaiwanDate_(dateObj);
+  if (!d || isNaN(d.getTime())) d = new Date();
+  return Utilities.formatDate(d, GLOBAL_CONFIG.TIMEZONE || "Asia/Taipei", GLOBAL_CONFIG.DATETIME_FORMAT || "yyyy-MM-dd HH:mm:ss");
+}
+
+/**
+ * 輔助工具：安全解析日期字串（相容 "yyyy-MM-dd HH:mm:ss" 台灣時間、ISO UTC 字串與 Date 物件）
+ */
+function parseTaiwanDate_(val) {
+  if (!val) return new Date(NaN);
+  if (val instanceof Date) return val;
+  var s = String(val).trim();
+  if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(s)) {
+    return new Date(s.replace(" ", "T") + "+08:00");
+  }
+  return new Date(s);
+}
+
+/**
+ * 一鍵將既有工作表中的 UTC 時間 (例如 2026-11-22T10:51:12.244Z) 批次轉成台灣時間 (yyyy-MM-dd HH:mm:ss)
+ * 可直接在 Apps Script 編輯器上方下拉選單選取後按「執行」
+ */
+function convertExistingSheetTimesToTaiwan() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    ss.setSpreadsheetTimeZone(GLOBAL_CONFIG.TIMEZONE || "Asia/Taipei");
+  } catch (e) {}
+
+  var targets = [
+    { sheet: GLOBAL_CONFIG.SHEET_MEMBERS, cols: [8, 9] },
+    { sheet: GLOBAL_CONFIG.SHEET_MONOLINE, cols: [9] },
+    { sheet: GLOBAL_CONFIG.SHEET_BINARY, cols: [12] },
+    { sheet: GLOBAL_CONFIG.SHEET_SETTLEMENTS, cols: [13] },
+    { sheet: GLOBAL_CONFIG.SHEET_BONUSES, cols: [7] },
+    { sheet: SHEET_CONFIG['CONTACT_M'].sheet, cols: [10] },
+    { sheet: SHEET_CONFIG['CONTACT_T'].sheet, cols: [9] },
+    { sheet: GLOBAL_CONFIG.SHEET_CLOUD_VAULT, cols: [9, 10] }
+  ];
+
+  var convertedCells = 0;
+  for (var t = 0; t < targets.length; t++) {
+    var sh = ss.getSheetByName(targets[t].sheet);
+    if (!sh || sh.getLastRow() < 2) continue;
+    var lastRow = sh.getLastRow();
+    for (var c = 0; c < targets[t].cols.length; c++) {
+      var colIdx = targets[t].cols[c];
+      if (colIdx > sh.getLastColumn()) continue;
+      var range = sh.getRange(2, colIdx, lastRow - 1, 1);
+      var vals = range.getValues();
+      var changed = false;
+      for (var r = 0; r < vals.length; r++) {
+        var v = vals[r][0];
+        if (!v) continue;
+        if (v instanceof Date || /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(String(v).trim())) {
+          vals[r][0] = formatTaiwanDateTime_(v);
+          changed = true;
+          convertedCells++;
+        }
+      }
+      if (changed) {
+        range.setNumberFormat("@");
+        range.setValues(vals);
+      }
+    }
+  }
+  return { success: true, convertedCells: convertedCells, timezone: GLOBAL_CONFIG.TIMEZONE };
+}
+
+/**
+ * 輔助工具：標準化手機號碼字串並保護開頭 0（例如 932605401 自動補回 0932605401）
+ */
+function normalizePhoneText_(rawPhone) {
+  var s = String(rawPhone == null ? "" : rawPhone).trim();
+  if (/^9\\d{8}$/.test(s)) {
+    return "0" + s;
+  }
+  return s;
+}
+
+/**
+ * 輔助工具：先將指定欄位設為純文字格式 (@) 再寫入列資料，確保手機開頭 0 與台灣時間字串永不被試算表誤轉格式
+ */
+function appendRowWithPlainTextCols_(sheet, rowValues, plainTextCols) {
+  var nextRow = sheet.getLastRow() + 1;
+  if (plainTextCols && plainTextCols.length > 0) {
+    for (var i = 0; i < plainTextCols.length; i++) {
+      var colIdx = plainTextCols[i];
+      if (colIdx >= 1 && colIdx <= rowValues.length) {
+        sheet.getRange(nextRow, colIdx).setNumberFormat("@");
+      }
+    }
+  }
+  sheet.getRange(nextRow, 1, 1, rowValues.length).setValues([rowValues]);
+  return nextRow;
+}
+
+/**
+ * 一鍵修復既有工作表中開頭 0 被吃掉的手機號碼（例如 932605401 -> 0932605401）並強制該欄為純文字
+ * 可直接在 Apps Script 編輯器上方下拉選單選取後按「執行」
+ */
+function fixExistingPhoneLeadingZeros() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targets = [
+    { sheet: GLOBAL_CONFIG.SHEET_MEMBERS, cols: [3] },
+    { sheet: SHEET_CONFIG['CONTACT_M'].sheet, cols: [4, 5] }
+  ];
+  var fixedCells = 0;
+  for (var t = 0; t < targets.length; t++) {
+    var sh = ss.getSheetByName(targets[t].sheet);
+    if (!sh || sh.getLastRow() < 2) continue;
+    var lastRow = sh.getLastRow();
+    for (var c = 0; c < targets[t].cols.length; c++) {
+      var colIdx = targets[t].cols[c];
+      if (colIdx > sh.getLastColumn()) continue;
+      var range = sh.getRange(2, colIdx, lastRow - 1, 1);
+      var vals = range.getValues();
+      range.setNumberFormat("@");
+      var changed = false;
+      for (var r = 0; r < vals.length; r++) {
+        var raw = vals[r][0];
+        if (raw === "" || raw === null || raw === undefined) continue;
+        var s = String(raw).trim();
+        var normalized = normalizePhoneText_(s);
+        if (normalized !== s || typeof raw === "number") {
+          vals[r][0] = normalized;
+          changed = true;
+          fixedCells++;
+        }
+      }
+      if (changed) {
+        range.setValues(vals);
+      }
+    }
+  }
+  return { success: true, fixedCells: fixedCells };
 }
 
 function getOrCreateSheet(ss, name) {
@@ -1494,8 +1719,8 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
     for (var i = 0; i < existing.length; i++) {
       if (String(existing[i][0]).toUpperCase() === mid && existing[i][2] && existing[i][5]) {
         // 已存在專屬資料夾與試算表：更新最後同步時間並同步各模組唯讀保護狀態
-        var nowSync = new Date();
-        vaultIndexSheet.getRange(i + 2, 10).setValue(nowSync);
+        var nowSyncTw = formatTaiwanDateTime_(new Date());
+        vaultIndexSheet.getRange(i + 2, 10).setValue(nowSyncTw);
         if (customTabs && customTabs.length > 0) {
           syncMemberSpreadsheetTabProtections_(String(existing[i][5]), customTabs);
         }
@@ -1545,7 +1770,7 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
     syncMemberSpreadsheetTabProtections_(memberSs.getId(), customTabs);
   }
 
-  var now = new Date();
+  var nowTw = formatTaiwanDateTime_(new Date());
   var folderId = memberFolder.getId();
   var folderUrl = memberFolder.getUrl();
   var spreadsheetId = memberSs.getId();
@@ -1553,7 +1778,7 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
 
   vaultIndexSheet.appendRow([
     mid, mName, folderId, folderName, folderUrl,
-    spreadsheetId, sheetTitle, spreadsheetUrl, now, now
+    spreadsheetId, sheetTitle, spreadsheetUrl, nowTw, nowTw
   ]);
 
   return {
@@ -1618,7 +1843,7 @@ function checkMemberModuleWritePermission_(memberMid, moduleKey) {
     for (var i = 0; i < rows.length; i++) {
       if (String(rows[i][0]).toUpperCase() === mid && String(rows[i][1]).toUpperCase() === baseKey) {
         var st = String(rows[i][2] || "");
-        var expVal = rows[i][3] ? new Date(rows[i][3]).getTime() : 0;
+        var expVal = rows[i][3] ? parseTaiwanDate_(rows[i][3]).getTime() : 0;
         if (st === "EXPIRED_FROZEN" || st === "NOT_ORDERED" || (expVal > 0 && expVal <= nowMs)) {
           return {
             canView: true,
@@ -1638,7 +1863,7 @@ function checkMemberModuleWritePermission_(memberMid, moduleKey) {
       var mData = sheetMembers.getRange(2, 1, sheetMembers.getLastRow() - 1, 9).getValues();
       for (var m = 0; m < mData.length; m++) {
         if (String(mData[m][0]).toUpperCase() === mid) {
-          var memExp = mData[m][8] ? new Date(mData[m][8]).getTime() : 0;
+          var memExp = mData[m][8] ? parseTaiwanDate_(mData[m][8]).getTime() : 0;
           if (memExp > 0 && memExp <= nowMs) {
             return {
               canView: true,
@@ -1763,11 +1988,12 @@ function upsertTempIndexRecord_(cacheKey, entityType, lookupToken, primaryMid, s
     }
     var now = new Date();
     var exp = new Date(now.getTime() + GLOBAL_CONFIG.CACHE_DEFAULT_TTL_SEC * 1000);
+    var expTw = formatTaiwanDateTime_(exp);
     var tokenUpper = String(lookupToken || "").trim().toUpperCase();
     var payloadStr = JSON.stringify(payloadObj || {});
-    idxSheet.appendRow([cacheKey, entityType, tokenUpper, primaryMid, sheetName, rowIndex, 1, payloadStr, exp, ""]);
+    idxSheet.appendRow([cacheKey, entityType, tokenUpper, primaryMid, sheetName, rowIndex, 1, payloadStr, expTw, ""]);
     setHotCache_(cacheKey, {
-      sheetName: sheetName, rowIndex: rowIndex, primaryMid: primaryMid, payload: payloadObj, expiresAt: exp.toISOString()
+      sheetName: sheetName, rowIndex: rowIndex, primaryMid: primaryMid, payload: payloadObj, expiresAt: expTw
     }, GLOBAL_CONFIG.CACHE_DEFAULT_TTL_SEC);
   } catch (e) {
     Logger.log("upsertTempIndexRecord_ Warning: " + e.toString());
@@ -2054,15 +2280,163 @@ function getSystemStats() {
   var sBi = ss.getSheetByName(GLOBAL_CONFIG.SHEET_BINARY);
   var sSet = ss.getSheetByName(GLOBAL_CONFIG.SHEET_SETTLEMENTS);
 
+  var nowTw = formatTaiwanDateTime_(new Date());
   var statsObj = {
+    spreadsheetName: ss.getName(),
     totalMembers: sMembers ? Math.max(0, sMembers.getLastRow() - 1) : 0,
     totalMonolineNodes: sMono ? Math.max(0, sMono.getLastRow() - 1) : 0,
     totalBinaryNodes: sBi ? Math.max(0, sBi.getLastRow() - 1) : 0,
     totalSettlements: sSet ? Math.max(0, sSet.getLastRow() - 1) : 0,
-    cachedAt: new Date().toISOString()
+    checkedAt: nowTw,
+    cachedAt: nowTw
   };
   setHotCache_("SYS_STATS", statsObj, 120);
   return { success: true, cacheHit: false, source: "SHEETS_COMPUTED_AND_CACHED", elapsedMs: new Date().getTime() - t0, data: statsObj };
+}
+
+/**
+ * 供 Render / 雲端主機開機或休眠喚醒時自動回讀真實試算表帳本（解決免費主機重啟重置問題）
+ */
+function exportHydrationState() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var maxRows = 5000;
+
+  var members = [];
+  var sMembers = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MEMBERS);
+  if (sMembers && sMembers.getLastRow() >= 2) {
+    var mCount = Math.min(maxRows, sMembers.getLastRow() - 1);
+    var mVals = sMembers.getRange(2, 1, mCount, Math.min(12, sMembers.getLastColumn())).getValues();
+    for (var i = 0; i < mVals.length; i++) {
+      var r = mVals[i];
+      var mid = String(r[0] || "").trim().toUpperCase();
+      if (!mid) continue;
+      members.push({
+        mid: mid,
+        name: String(r[1] || mid).trim(),
+        phone: normalizePhoneText_(r[2] || ""),
+        idNumberMasked: String(r[3] || "").trim(),
+        sponsorMid: String(r[4] || GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID).trim().toUpperCase(),
+        storeId: String(r[5] || "S-TAIPEI-01").trim(),
+        centerId: String(r[6] || "EDU-GLOBAL-01").trim(),
+        registeredAt: r[7] ? formatTaiwanDateTime_(r[7]) : formatTaiwanDateTime_(new Date()),
+        trialExpiresAt: r[8] ? formatTaiwanDateTime_(r[8]) : formatTaiwanDateTime_(new Date(new Date().getTime() + 30 * 86400000)),
+        accumulatedRentAmount: Number(r[9] || 0),
+        monolineNodeId: String(r[10] || "").trim().toUpperCase(),
+        binaryNodeId: String(r[11] || "").trim().toUpperCase()
+      });
+    }
+  }
+
+  var monolineNodes = [];
+  var sMono = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MONOLINE);
+  if (sMono && sMono.getLastRow() >= 2) {
+    var moCount = Math.min(maxRows, sMono.getLastRow() - 1);
+    var moVals = sMono.getRange(2, 1, moCount, Math.min(10, sMono.getLastColumn())).getValues();
+    for (var m = 0; m < moVals.length; m++) {
+      var mr = moVals[m];
+      var nid = String(mr[0] || "").trim().toUpperCase();
+      if (!nid) continue;
+      monolineNodes.push({
+        nodeId: nid,
+        mid: String(mr[1] || "").trim().toUpperCase(),
+        name: String(mr[2] || nid).trim(),
+        parentId: String(mr[3] || "HQ_ROOT").trim(),
+        depth: Number(mr[4] || (m + 1)),
+        sponsorMid: String(mr[5] || GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID).trim().toUpperCase(),
+        status: String(mr[6] || "TRIAL_ACTIVE").trim(),
+        hqPermanentLocked: Boolean(mr[7]),
+        trialExpiresAt: mr[8] ? formatTaiwanDateTime_(mr[8]) : formatTaiwanDateTime_(new Date(new Date().getTime() + 30 * 86400000)),
+        totalEarnings: Number(mr[9] || 0)
+      });
+    }
+  }
+
+  var binaryNodes = [];
+  var sBi = ss.getSheetByName(GLOBAL_CONFIG.SHEET_BINARY);
+  if (sBi && sBi.getLastRow() >= 2) {
+    var biCount = Math.min(maxRows, sBi.getLastRow() - 1);
+    var biVals = sBi.getRange(2, 1, biCount, Math.min(13, sBi.getLastColumn())).getValues();
+    for (var b = 0; b < biVals.length; b++) {
+      var br = biVals[b];
+      var bId = String(br[0] || "").trim().toUpperCase();
+      if (!bId) continue;
+      binaryNodes.push({
+        nodeId: bId,
+        mid: String(br[1] || "").trim().toUpperCase(),
+        name: String(br[2] || bId).trim(),
+        parentId: String(br[3] || "SYSTEM_ROOT").trim(),
+        placementPosition: String(br[4] || "L").trim().toUpperCase(),
+        depth: Number(br[5] || 0),
+        leftChildId: String(br[6] || "").trim().toUpperCase(),
+        rightChildId: String(br[7] || "").trim().toUpperCase(),
+        sponsorMid: String(br[8] || GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID).trim().toUpperCase(),
+        status: String(br[9] || "TRIAL_ACTIVE").trim(),
+        hqPermanentLocked: Boolean(br[10]),
+        trialExpiresAt: br[11] ? formatTaiwanDateTime_(br[11]) : formatTaiwanDateTime_(new Date(new Date().getTime() + 30 * 86400000)),
+        totalEarnings: Number(br[12] || 0)
+      });
+    }
+  }
+
+  var contacts = [];
+  var sContactM = ss.getSheetByName(SHEET_CONFIG['CONTACT_M'].sheet);
+  if (sContactM && sContactM.getLastRow() >= 2) {
+    var cmCount = Math.min(maxRows, sContactM.getLastRow() - 1);
+    var cmVals = sContactM.getRange(2, 1, cmCount, Math.min(10, sContactM.getLastColumn())).getValues();
+    for (var c = 0; c < cmVals.length; c++) {
+      var cr = cmVals[c];
+      var cid = String(cr[0] || "").trim().toUpperCase();
+      if (!cid) continue;
+      contacts.push({
+        id: cid,
+        status: String(cr[1] || "開通AI軟體1+1").trim(),
+        name: String(cr[2] || "").trim(),
+        phone: normalizePhoneText_(cr[3] || ""),
+        tel: String(cr[4] || "").trim(),
+        line: String(cr[5] || "").trim(),
+        email: String(cr[6] || "").trim(),
+        address: String(cr[7] || "").trim(),
+        photoUrl: String(cr[8] || "").trim(),
+        updatedAt: cr[9] ? formatTaiwanDateTime_(cr[9]) : formatTaiwanDateTime_(new Date())
+      });
+    }
+  }
+
+  var contactTrackings = [];
+  var sContactT = ss.getSheetByName(SHEET_CONFIG['CONTACT_T'].sheet);
+  if (sContactT && sContactT.getLastRow() >= 2) {
+    var ctCount = Math.min(maxRows, sContactT.getLastRow() - 1);
+    var ctVals = sContactT.getRange(2, 1, ctCount, Math.min(9, sContactT.getLastColumn())).getValues();
+    for (var k = 0; k < ctVals.length; k++) {
+      var kr = ctVals[k];
+      var tid = String(kr[0] || "").trim().toUpperCase();
+      if (!tid) continue;
+      contactTrackings.push({
+        id: tid,
+        status: String(kr[1] || "開通體驗").trim(),
+        name: String(kr[2] || "").trim(),
+        contactDate: kr[3] ? String(kr[3]).trim() : Utilities.formatDate(new Date(), GLOBAL_CONFIG.TIMEZONE, "yyyy-MM-dd"),
+        contactMethod: String(kr[4] || "線上開通").trim(),
+        discussionContent: String(kr[5] || "").trim(),
+        nextStepPlan: String(kr[6] || "").trim(),
+        photoUrl: String(kr[7] || "").trim(),
+        updatedAt: kr[8] ? formatTaiwanDateTime_(kr[8]) : formatTaiwanDateTime_(new Date())
+      });
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      spreadsheetName: ss.getName(),
+      exportedAt: formatTaiwanDateTime_(new Date()),
+      members: members,
+      monolineNodes: monolineNodes,
+      binaryNodes: binaryNodes,
+      contacts: contacts,
+      contactTrackings: contactTrackings
+    }
+  };
 }
 
 /**
@@ -2193,7 +2567,7 @@ function runMidnightCoreLedgerBackup(requestData) {
 
   manifest.appendRow([
     ledgerPayload.backupId, fileName, file.getId(), file.getUrl(),
-    triggerType, memCount, biCount, setCount, checksum, jsonStr.length, now, "COMPLETED"
+    triggerType, memCount, biCount, setCount, checksum, jsonStr.length, formatTaiwanDateTime_(now), "COMPLETED"
   ]);
 
   // 自動清理超過保留天數之舊 JSON 備份檔案

@@ -1165,12 +1165,14 @@ export class ERPEngine {
     // 4. 自動生成通訊主檔編號 (CONTACT_M / CM-)
     this.currentContactCounter += 1;
     const contactId = `CM-${String(this.currentContactCounter).padStart(5, '0')}`;
-    const userPhone = params.phone || '09' + Math.floor(10000000 + Math.random() * 90000000);
-    const userTel = params.tel || '02-' + Math.floor(20000000 + Math.random() * 70000000);
-    const userLine = params.line || params.name.toLowerCase().replace(/\s+/g, '_') + '_line';
-    const userEmail = params.email || `${monolineMid.toLowerCase()}@ai-saas.tw`;
-    const userAddress = params.address || '台灣生活圈 (已開通AI軟體1+1體驗)';
-    const userPhoto = params.photoUrl || `https://images.unsplash.com/photo-${1534528741775 + (this.currentContactCounter % 10)}?w=200&auto=format&fit=crop&q=80`;
+    const userPhone = (params.phone || '').trim();
+    const userTel = (params.tel || '').trim();
+    const userLine = (params.line || '').trim();
+    const userEmail = (params.email || '').trim();
+    const userAddress = (params.address || '').trim();
+    const userPhoto =
+      (params.photoUrl || '').trim() ||
+      `https://images.unsplash.com/photo-${1534528741775 + (this.currentContactCounter % 10)}?w=200&auto=format&fit=crop&q=80`;
 
     const cleanMid = monolineMid.replace(/[^A-Z0-9]/gi, '');
     const cloudFolderId = `GDRV-${cleanMid}`;
@@ -1188,7 +1190,7 @@ export class ERPEngine {
       email: userEmail,
       address: userAddress,
       photoUrl: userPhoto,
-      idNumberMasked: params.idNumberMasked || `A1${Math.floor(10000000 + Math.random() * 90000000).toString().substring(0, 3)}***`,
+      idNumberMasked: (params.idNumberMasked || '').trim(),
       sponsorMid,
       storeId: params.storeId || 'S-TAIPEI-01',
       centerId: params.centerId || 'EDU-GLOBAL-01',
@@ -3331,6 +3333,305 @@ export class ERPEngine {
         },
         pools: { publicSafetyAccumulated: 0, abanyTechAccumulated: 0, hqOpsAccumulated: 0 },
       },
+    };
+  }
+
+  /**
+   * 僅回傳公開免登入入會頁所需的推薦人基本識別（絕不洩漏手機/信箱/地址等個資）
+   */
+  public getPublicSponsorInfo(rawSponsorMid?: string | null): {
+    valid: boolean;
+    sponsorMid: string;
+    sponsorName: string;
+  } {
+    const cleaned = (rawSponsorMid || '').trim().toUpperCase();
+    if (cleaned) {
+      const found = this.members.get(cleaned);
+      if (found) {
+        return {
+          valid: true,
+          sponsorMid: found.mid,
+          sponsorName: found.name,
+        };
+      }
+      // 即使試算表尚未同步該推薦碼，仍保留符合格式之推薦碼供入會綁定
+      if (/^A-\d{4,8}$/.test(cleaned)) {
+        return {
+          valid: true,
+          sponsorMid: cleaned,
+          sponsorName: `專屬推薦夥伴 (${cleaned})`,
+        };
+      }
+    }
+    const flagship = this.members.get(GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID);
+    return {
+      valid: true,
+      sponsorMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+      sponsorName: flagship?.name || '總部直屬旗艦領袖',
+    };
+  }
+
+  /**
+   * 從 Google 試算表 GAS exportHydrationState 回讀真實會員、節點與通訊錄（解決免費主機休眠重置問題）
+   */
+  public hydrateFromGasExport(payload: {
+    members?: any[];
+    monolineNodes?: any[];
+    binaryNodes?: any[];
+    contacts?: any[];
+    contactTrackings?: any[];
+  }): {
+    importedMembers: number;
+    importedMonoline: number;
+    importedBinary: number;
+    importedContacts: number;
+    importedTrackings: number;
+  } {
+    const parseIso = (raw: any, fallbackMsOffset = 0): string => {
+      if (!raw) return new Date(Date.now() + fallbackMsOffset).toISOString();
+      const s = String(raw).trim();
+      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+        const d = new Date(s.replace(' ', 'T') + '+08:00');
+        if (!isNaN(d.getTime())) return d.toISOString();
+      }
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return d.toISOString();
+      return new Date(Date.now() + fallbackMsOffset).toISOString();
+    };
+
+    const normalizePhone = (raw: any): string => {
+      const s = String(raw ?? '').trim();
+      return /^9\d{8}$/.test(s) ? `0${s}` : s;
+    };
+
+    let importedMembers = 0;
+    let importedMonoline = 0;
+    let importedBinary = 0;
+    let importedContacts = 0;
+    let importedTrackings = 0;
+
+    if (Array.isArray(payload.members)) {
+      for (const row of payload.members) {
+        const mid = String(row?.mid || '').trim().toUpperCase();
+        if (!mid) continue;
+        const existing = this.members.get(mid);
+        const name = String(row?.name || existing?.name || mid).trim();
+        const monolineNodeId = String(row?.monolineNodeId || existing?.monolineNodeId || '').trim().toUpperCase();
+        const binaryNodeId = String(row?.binaryNodeId || existing?.binaryNodeId || '').trim().toUpperCase();
+        const cleanMid = mid.replace(/[^A-Z0-9]/gi, '');
+        const member: Member = {
+          mid,
+          name,
+          phone: normalizePhone(row?.phone) || existing?.phone || '',
+          tel: String(row?.tel ?? existing?.tel ?? '').trim(),
+          line: String(row?.line ?? existing?.line ?? '').trim(),
+          email: String(row?.email ?? existing?.email ?? '').trim(),
+          address: String(row?.address ?? existing?.address ?? '').trim(),
+          photoUrl:
+            String(row?.photoUrl || existing?.photoUrl || '').trim() ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          idNumberMasked: String(row?.idNumberMasked ?? existing?.idNumberMasked ?? '').trim(),
+          sponsorMid:
+            String(row?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
+              .trim()
+              .toUpperCase(),
+          storeId: String(row?.storeId || existing?.storeId || 'S-TAIPEI-01').trim(),
+          centerId: String(row?.centerId || existing?.centerId || 'EDU-GLOBAL-01').trim(),
+          registeredAt: parseIso(row?.registeredAt),
+          trialExpiresAt: parseIso(row?.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000),
+          accumulatedRentAmount: Number(row?.accumulatedRentAmount ?? existing?.accumulatedRentAmount ?? 0),
+          monolineNodeId: monolineNodeId || existing?.monolineNodeId || `C-${mid.replace(/^A-/, '')}`,
+          binaryNodeId: binaryNodeId || existing?.binaryNodeId || GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID,
+          contactId: existing?.contactId,
+          cloudFolderId: existing?.cloudFolderId || `GDRV-${cleanMid}`,
+          cloudFolderName: existing?.cloudFolderName || `【AIS-ERP 會員雲端】${mid} ${name}`,
+          cloudFolderUrl: existing?.cloudFolderUrl || `https://drive.google.com/drive/folders/GDRV-${cleanMid}`,
+          cloudSpreadsheetId: existing?.cloudSpreadsheetId || `GSHEET-${cleanMid}`,
+          cloudSpreadsheetName: existing?.cloudSpreadsheetName || `${mid}_${name}_AI軟體專屬試算表`,
+          cloudSpreadsheetUrl: existing?.cloudSpreadsheetUrl || `https://docs.google.com/spreadsheets/d/GSHEET-${cleanMid}`,
+        };
+        this.members.set(mid, member);
+        initNewMemberDefaultPacks(mid);
+        importedMembers++;
+
+        const mNum = parseInt(mid.replace(/^A-/, ''), 10);
+        if (!isNaN(mNum) && mNum !== 1113 && mNum < 25000000 && mNum > this.currentMonolineCounter) {
+          this.currentMonolineCounter = mNum;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.monolineNodes)) {
+      for (const row of payload.monolineNodes) {
+        const nodeId = String(row?.nodeId || '').trim().toUpperCase();
+        if (!nodeId) continue;
+        const existing = this.monolineNodes.get(nodeId);
+        const mid = String(row?.mid || existing?.mid || '').trim().toUpperCase();
+        const node: NodeRecord = {
+          nodeId,
+          mid,
+          name: String(row?.name || existing?.name || nodeId).trim(),
+          type: 'MONOLINE',
+          track: 'MONOLINE',
+          status: (row?.status as NodeStatus) || existing?.status || 'TRIAL_ACTIVE',
+          parentId: String(row?.parentId || existing?.parentId || 'HQ_ROOT').trim(),
+          placementPosition: 'MONOLINE_QUEUE',
+          depth: Number(row?.depth ?? existing?.depth ?? 1),
+          sponsorMid: String(row?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
+            .trim()
+            .toUpperCase(),
+          hqPermanentLocked: Boolean(row?.hqPermanentLocked ?? existing?.hqPermanentLocked ?? false),
+          trialExpiresAt: parseIso(row?.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000),
+          totalEarnings: Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0),
+          softwareKey: existing?.softwareKey || 'CONTACT',
+          softwareTitle: existing?.softwareTitle || '通訊錄 CRM (1+1單軌)',
+        };
+        this.monolineNodes.set(nodeId, node);
+        importedMonoline++;
+
+        const cNum = parseInt(nodeId.replace(/^C-/, ''), 10);
+        if (!isNaN(cNum) && cNum !== 1113 && cNum < 25000000 && cNum > this.currentMonolineCounter) {
+          this.currentMonolineCounter = cNum;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.binaryNodes)) {
+      for (const row of payload.binaryNodes) {
+        const nodeId = String(row?.nodeId || '').trim().toUpperCase();
+        if (!nodeId) continue;
+        const existing = this.binaryNodes.get(nodeId);
+        const posRaw = String(row?.placementPosition || existing?.placementPosition || 'L').trim().toUpperCase();
+        const placementPosition: NodeRecord['placementPosition'] =
+          posRaw === 'ROOT' || posRaw === 'L' || posRaw === 'R' ? posRaw : 'L';
+        const node: NodeRecord = {
+          nodeId,
+          mid: String(row?.mid || existing?.mid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID).trim().toUpperCase(),
+          name: String(row?.name || existing?.name || nodeId).trim(),
+          type:
+            nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
+              ? 'BINARY_ROOT'
+              : existing?.type || 'BINARY_MEMBER_SLOT',
+          track: 'BINARY',
+          status: (row?.status as NodeStatus) || existing?.status || 'TRIAL_ACTIVE',
+          parentId: String(row?.parentId || existing?.parentId || GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID).trim(),
+          placementPosition,
+          depth: Number(row?.depth ?? existing?.depth ?? 1),
+          leftChildId: String(row?.leftChildId || existing?.leftChildId || '').trim().toUpperCase() || undefined,
+          rightChildId: String(row?.rightChildId || existing?.rightChildId || '').trim().toUpperCase() || undefined,
+          sponsorMid: String(row?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
+            .trim()
+            .toUpperCase(),
+          hqPermanentLocked: Boolean(row?.hqPermanentLocked ?? existing?.hqPermanentLocked ?? false),
+          trialExpiresAt: parseIso(row?.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000),
+          totalEarnings: Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0),
+          softwareKey: existing?.softwareKey || 'EVENT',
+          softwareTitle: existing?.softwareTitle || '活動行銷 (1+1雙軌)',
+        };
+        this.binaryNodes.set(nodeId, node);
+        importedBinary++;
+
+        const bNum = parseInt(nodeId.replace(/^C-/, ''), 10);
+        if (!isNaN(bNum) && bNum >= 25000001 && bNum > this.currentBinaryCounter) {
+          this.currentBinaryCounter = bNum;
+        }
+      }
+
+      // Ensure parent left/right child pointers stay linked
+      for (const node of this.binaryNodes.values()) {
+        if (!node.parentId || node.parentId === 'SYSTEM_ROOT') continue;
+        const parent = this.binaryNodes.get(node.parentId);
+        if (!parent) continue;
+        if (node.placementPosition === 'L' && !parent.leftChildId) {
+          parent.leftChildId = node.nodeId;
+        } else if (node.placementPosition === 'R' && !parent.rightChildId) {
+          parent.rightChildId = node.nodeId;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.contacts)) {
+      for (const row of payload.contacts) {
+        const cid = String(row?.id || '').trim().toUpperCase();
+        if (!cid) continue;
+        const existing = this.contacts.get(cid);
+        const contact: ContactMasterRecord = {
+          id: cid,
+          status: String(row?.status || existing?.status || '開通AI軟體1+1').trim(),
+          name: String(row?.name || existing?.name || '').trim(),
+          phone: normalizePhone(row?.phone) || existing?.phone || '',
+          tel: String(row?.tel ?? existing?.tel ?? '').trim(),
+          line: String(row?.line ?? existing?.line ?? '').trim(),
+          email: String(row?.email ?? existing?.email ?? '').trim(),
+          address: String(row?.address ?? existing?.address ?? '').trim(),
+          photoUrl:
+            String(row?.photoUrl || existing?.photoUrl || '').trim() ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          updatedAt: parseIso(row?.updatedAt),
+          memberMid: existing?.memberMid,
+          monolineNodeId: existing?.monolineNodeId,
+          binaryNodeId: existing?.binaryNodeId,
+        };
+        this.contacts.set(cid, contact);
+        importedContacts++;
+
+        // Enrich matching member's tel/line/email/address if matched by phone or name
+        for (const m of this.members.values()) {
+          if ((contact.phone && m.phone === contact.phone) || (contact.name && m.name === contact.name && !m.contactId)) {
+            if (!m.tel && contact.tel) m.tel = contact.tel;
+            if (!m.line && contact.line) m.line = contact.line;
+            if (!m.email && contact.email) m.email = contact.email;
+            if (!m.address && contact.address) m.address = contact.address;
+            if (!m.contactId) m.contactId = cid;
+            contact.memberMid = m.mid;
+            break;
+          }
+        }
+
+        const cmNum = parseInt(cid.replace(/^CM-/, ''), 10);
+        if (!isNaN(cmNum) && cmNum > this.currentContactCounter) {
+          this.currentContactCounter = cmNum;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.contactTrackings)) {
+      for (const row of payload.contactTrackings) {
+        const tid = String(row?.id || '').trim().toUpperCase();
+        if (!tid) continue;
+        const existing = this.contactTrackings.get(tid);
+        const rec: ContactTrackingRecord = {
+          id: tid,
+          status: String(row?.status || existing?.status || '開通體驗').trim(),
+          name: String(row?.name || existing?.name || '').trim(),
+          contactDate: String(row?.contactDate || existing?.contactDate || new Date().toISOString().split('T')[0]).trim(),
+          contactMethod: String(row?.contactMethod || existing?.contactMethod || '線上開通').trim(),
+          discussionContent: String(row?.discussionContent || existing?.discussionContent || '').trim(),
+          nextStepPlan: String(row?.nextStepPlan || existing?.nextStepPlan || '').trim(),
+          photoUrl:
+            String(row?.photoUrl || existing?.photoUrl || '').trim() ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          updatedAt: parseIso(row?.updatedAt),
+          contactId: existing?.contactId,
+          memberMid: existing?.memberMid,
+        };
+        this.contactTrackings.set(tid, rec);
+        importedTrackings++;
+
+        const ctNum = parseInt(tid.replace(/^CT-/, ''), 10);
+        if (!isNaN(ctNum) && ctNum > this.currentTrackingCounter) {
+          this.currentTrackingCounter = ctNum;
+        }
+      }
+    }
+
+    this.saveState();
+    return {
+      importedMembers,
+      importedMonoline,
+      importedBinary,
+      importedContacts,
+      importedTrackings,
     };
   }
 }

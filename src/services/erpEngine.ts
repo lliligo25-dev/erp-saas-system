@@ -339,12 +339,13 @@ export class ERPEngine {
     // 4. 自動生成通訊主檔編號 (CONTACT_M / CM-)
     this.currentContactCounter += 1;
     const contactId = `CM-${String(this.currentContactCounter).padStart(5, '0')}`;
-    const userPhone = params.phone || '09' + Math.floor(10000000 + Math.random() * 90000000);
-    const userTel = params.tel || '02-' + Math.floor(20000000 + Math.random() * 70000000);
-    const userLine = params.line || params.name.toLowerCase().replace(/\s+/g, '_') + '_line';
-    const userEmail = params.email || `${monolineMid.toLowerCase()}@ai-saas.tw`;
-    const userAddress = params.address || '台灣生活圈 (已開通AI軟體1+1體驗)';
-    const userPhoto = params.photoUrl || `https://images.unsplash.com/photo-${1534528741775 + (this.currentContactCounter % 10)}?w=200&auto=format&fit=crop&q=80`;
+    const userPhone = (params.phone || '').trim();
+    const userTel = (params.tel || '').trim();
+    const userLine = (params.line || '').trim();
+    const userEmail = (params.email || '').trim();
+    const userAddress = (params.address || '').trim();
+    const userPhoto = (params.photoUrl || '').trim();
+    const userIdNumberMasked = (params.idNumberMasked || '').trim();
 
     const cleanMid = monolineMid.replace(/[^A-Z0-9]/gi, '');
     const cloudFolderId = `GDRV-${cleanMid}`;
@@ -362,7 +363,7 @@ export class ERPEngine {
       email: userEmail,
       address: userAddress,
       photoUrl: userPhoto,
-      idNumberMasked: params.idNumberMasked || `A1${Math.floor(10000000 + Math.random() * 90000000).toString().substring(0, 3)}***`,
+      idNumberMasked: userIdNumberMasked,
       sponsorMid,
       storeId: params.storeId || 'S-TAIPEI-01',
       centerId: params.centerId || 'EDU-GLOBAL-01',

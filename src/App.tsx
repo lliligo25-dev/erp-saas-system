@@ -14,6 +14,7 @@ import {
 import { AuthSession, SystemStats, UserRole } from './types/erp';
 import { Header, NavItem } from './components/Header';
 import { RoleLoginPortal } from './components/RoleLoginPortal';
+import { PublicJoinFormView } from './components/PublicJoinFormView';
 import { RegistrationSimulator } from './components/RegistrationSimulator';
 import { MemberNodesView } from './components/MemberNodesView';
 import { StorePortalView } from './components/StorePortalView';
@@ -123,7 +124,9 @@ function getDefaultTabForRole(role: UserRole): string {
 export default function App() {
   const [initialPortalInfo] = useState(() => parsePortalFromUrl());
   const [lockedPortalRole] = useState<UserRole | null>(initialPortalInfo.lockedRole);
-  const [lockedIdentifier] = useState<string | null>(initialPortalInfo.targetId);
+  const [lockedIdentifier, setLockedIdentifier] = useState<string | null>(initialPortalInfo.targetId);
+  const [showPublicJoin, setShowPublicJoin] = useState<boolean>(initialPortalInfo.isPublicJoin);
+  const [publicJoinSponsorMid] = useState<string | null>(initialPortalInfo.sponsorMid);
 
   const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -419,7 +422,7 @@ export default function App() {
     );
   }
 
-  // Show Role Login Gateway if unauthenticated
+  // Show Public Unauthenticated Join Form or Role Login Gateway if unauthenticated
   if (!session) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -435,11 +438,26 @@ export default function App() {
         <div className="flex-1 bg-slate-950 overflow-x-auto">
           <div data-viewport={viewportMode} className={getViewportWrapperClass()}>
             <LineInAppBanner />
-            <RoleLoginPortal
-              onLoginSuccess={handleLoginSuccess}
-              lockedRole={lockedPortalRole}
-              initialIdentifier={lockedIdentifier}
-            />
+            {showPublicJoin ? (
+              <PublicJoinFormView
+                initialSponsorMid={publicJoinSponsorMid}
+                onGoToLogin={(prefillMid) => {
+                  if (prefillMid) {
+                    setLockedIdentifier(prefillMid);
+                  }
+                  setShowPublicJoin(false);
+                }}
+              />
+            ) : (
+              <RoleLoginPortal
+                onLoginSuccess={handleLoginSuccess}
+                lockedRole={lockedPortalRole}
+                initialIdentifier={lockedIdentifier}
+                onOpenPublicJoin={
+                  lockedPortalRole === 'HQ_STAFF' ? undefined : () => setShowPublicJoin(true)
+                }
+              />
+            )}
           </div>
         </div>
         <PublicShareDeployModal
@@ -925,6 +943,7 @@ export default function App() {
         onNavigateHqGas={
           session.role === 'HQ_STAFF' ? () => setCurrentTab('gas_api') : undefined
         }
+        onHydrated={refreshStats}
       />
     </div>
   );

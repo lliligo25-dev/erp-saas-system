@@ -38,6 +38,7 @@ interface RoleLoginPortalProps {
   onLoginSuccess: (session: AuthSession, bootstrap?: ScopedBootstrapPayload | null) => void;
   lockedRole?: UserRole | null;
   initialIdentifier?: string | null;
+  onOpenPublicJoin?: () => void;
 }
 
 interface RoleConfig {
@@ -109,6 +110,7 @@ export const RoleLoginPortal: React.FC<RoleLoginPortalProps> = ({
   onLoginSuccess,
   lockedRole = null,
   initialIdentifier = null,
+  onOpenPublicJoin,
 }) => {
   const initialRole: UserRole = lockedRole || 'MEMBER';
   const [selectedRole, setSelectedRole] = useState<UserRole>(initialRole);
@@ -125,8 +127,10 @@ export const RoleLoginPortal: React.FC<RoleLoginPortalProps> = ({
     if (lockedRole) {
       setSelectedRole(lockedRole);
       setErrorMsg(null);
-      setIdentifier(initialIdentifier || '');
       setPasscode('');
+    }
+    if (initialIdentifier) {
+      setIdentifier(initialIdentifier);
     }
   }, [lockedRole, initialIdentifier]);
 
@@ -426,6 +430,18 @@ export const RoleLoginPortal: React.FC<RoleLoginPortalProps> = ({
                     >
                       <Sparkles className="w-4 h-4 text-[#06C755]" />
                       <span>拍攝 LINE 會員 QR Code · 影像識別快速登入</span>
+                    </button>
+                  )}
+
+                  {!isHqPortal && onOpenPublicJoin && (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={onOpenPublicJoin}
+                      className="w-full py-2.5 px-4 bg-indigo-950/40 hover:bg-indigo-900/50 border border-indigo-500/40 text-indigo-200 font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4 text-sky-400" />
+                      <span>還沒有帳號？免登入免費開通 AI 軟體 1+1（30 天體驗）</span>
                     </button>
                   )}
                 </div>

@@ -182,6 +182,17 @@ export async function apiSyncErpAction(
   }
 }
 
+export interface GasHydrationStatusRemote {
+  ok: boolean;
+  source: 'startup' | 'manual';
+  message: string;
+  timestamp: string;
+  importedMembers: number;
+  importedMonolineNodes: number;
+  importedBinaryNodes: number;
+  importedContacts: number;
+}
+
 export interface GasBridgeRemoteState {
   gasWebAppUrl: string;
   autoSyncEnabled: boolean;
@@ -192,6 +203,77 @@ export interface GasBridgeRemoteState {
     timestamp: string;
     remoteStats?: Record<string, any> | null;
   } | null;
+  lastHydrationStatus?: GasHydrationStatusRemote | null;
+}
+
+export interface PublicSponsorInfoResponse {
+  ok: boolean;
+  valid: boolean;
+  sponsorMid: string;
+  sponsorName: string;
+}
+
+export interface PublicRegisterPayload {
+  name: string;
+  phone: string;
+  tel?: string;
+  line?: string;
+  email?: string;
+  address?: string;
+  idNumberMasked?: string;
+  sponsorMid?: string;
+  activateBookingSystem?: boolean;
+}
+
+export interface PublicRegisterResponse {
+  ok: boolean;
+  registration?: {
+    mid: string;
+    name: string;
+    phone: string;
+    sponsorMid: string;
+    monolineNodeId: string;
+    binaryNodeId: string;
+    trialExpiresAt: string;
+    bookingLicenseId: string | null;
+  };
+  message?: string;
+  error?: string;
+}
+
+export async function apiGetPublicSponsorInfo(
+  sponsorMid?: string | null
+): Promise<PublicSponsorInfoResponse> {
+  try {
+    const query = sponsorMid ? `?sponsor=${encodeURIComponent(sponsorMid.trim())}` : '';
+    const res = await fetch(`/api/public/sponsor-info${query}`, {
+      method: 'GET',
+      credentials: 'omit',
+    });
+    if (!res.ok) {
+      return { ok: false, valid: false, sponsorMid: '', sponsorName: '' };
+    }
+    return (await res.json()) as PublicSponsorInfoResponse;
+  } catch {
+    return { ok: false, valid: false, sponsorMid: '', sponsorName: '' };
+  }
+}
+
+export async function apiPublicRegisterMember(
+  payload: PublicRegisterPayload
+): Promise<PublicRegisterResponse> {
+  try {
+    const res = await fetch('/api/public/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'omit',
+      body: JSON.stringify(payload),
+    });
+    const data = (await res.json()) as PublicRegisterResponse;
+    return data;
+  } catch {
+    return { ok: false, error: '無法連線至註冊伺服器，請檢查網路後再試' };
+  }
 }
 
 export async function apiGetHqGasBridge(): Promise<{
@@ -215,10 +297,13 @@ export async function apiSaveAndTestHqGasBridge(params: {
   gasWebAppUrl?: string;
   autoSyncEnabled?: boolean;
   testPing?: boolean;
+  hydrateNow?: boolean;
 }): Promise<{
   ok: boolean;
   state?: GasBridgeRemoteState;
   pingResult?: GasBridgeRemoteState['lastSyncStatus'];
+  hydrationResult?: GasHydrationStatusRemote | null;
+  bootstrap?: ScopedBootstrapPayload;
   error?: string;
 }> {
   try {

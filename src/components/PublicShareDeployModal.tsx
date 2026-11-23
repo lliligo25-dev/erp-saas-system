@@ -32,16 +32,19 @@ import {
   OFFICIAL_GAS_EXEC_URL,
   OFFICIAL_SHARED_APP_URL,
   buildRolePortalUrl,
+  buildPublicJoinUrl,
   buildPublicMobileCenterUrl,
   getSavedExternalBaseUrl,
   validateExternalBaseUrl,
 } from '../services/rolePortalUrlService';
 import {
   GasBridgeRemoteState,
+  GasHydrationStatusRemote,
   apiDownloadHqProjectZip,
   apiGetHqGasBridge,
   apiSaveAndTestHqGasBridge,
 } from '../services/confidentialApiClient';
+import { erpEngine } from '../services/erpEngine';
 
 export type ShareDeployModalTab = 'share' | 'deploy';
 
@@ -53,9 +56,10 @@ interface PublicShareDeployModalProps {
   sessionUserId?: string | null;
   lockedPortalRole?: UserRole | null;
   onNavigateHqGas?: () => void;
+  onHydrated?: () => void;
 }
 
-type PublicTargetChoice = 'PUBLIC_CENTER' | 'MEMBER' | 'STORE' | 'CENTER' | 'HQ_STAFF';
+type PublicTargetChoice = 'PUBLIC_JOIN' | 'PUBLIC_CENTER' | 'MEMBER' | 'STORE' | 'CENTER' | 'HQ_STAFF';
 
 const CORRECTED_EMBED_HTML = `<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -88,7 +92,7 @@ const CORRECTED_EMBED_HTML = `<!DOCTYPE html>
       var isLine = /\\bLine\\//i.test(ua) || /\\bLIFF\\b/i.test(ua);
       var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|\\bLine\\//i.test(ua) || (window.innerWidth > 0 && window.innerWidth <= 820);
       function mount(p) {
-        var keys = ["portal", "id", "qrToken", "device", "inapp", "openExternalBrowser"];
+        var keys = ["portal", "id", "sponsor", "ref", "qrToken", "device", "inapp", "openExternalBrowser"];
         var qs = [], hasDev = false;
         for (var i = 0; i < keys.length; i++) {
           var v = p && p[keys[i]];
@@ -121,6 +125,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
   sessionUserId = null,
   lockedPortalRole = null,
   onNavigateHqGas,
+  onHydrated,
 }) => {
   const isHqStaff = sessionRole === 'HQ_STAFF';
   const [activeTab, setActiveTab] = useState<ShareDeployModalTab>(initialTab);
@@ -134,7 +139,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
   const [targetChoice, setTargetChoice] = useState<PublicTargetChoice>(() => {
     if (lockedPortalRole && lockedPortalRole !== 'HQ_STAFF') return lockedPortalRole;
     if (sessionRole && sessionRole !== 'HQ_STAFF') return sessionRole;
-    return 'MEMBER';
+    return 'PUBLIC_JOIN';
   });
   const [mobileMode, setMobileMode] = useState<boolean>(true);
   const [lineExternalMode, setLineExternalMode] = useState<boolean>(true);
@@ -156,6 +161,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
     timestamp?: string;
     remoteStats?: Record<string, any> | null;
   } | null>(null);
+  const [hydrationFeedback, setHydrationFeedback] = useState<GasHydrationStatusRemote | null>(null);
   const [zipDownloading, setZipDownloading] = useState<boolean>(false);
   const [zipFeedback, setZipFeedback] = useState<{
     ok: boolean;
@@ -189,6 +195,9 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
           remoteStats: res.state.lastSyncStatus.remoteStats || null,
         });
       }
+      if (res.state.lastHydrationStatus) {
+        setHydrationFeedback(res.state.lastHydrationStatus);
+      }
     });
     return () => {
       cancelled = true;
@@ -209,6 +218,12 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
   const generatedUrl = useMemo(() => {
     const customId =
       sessionRole && sessionRole !== 'HQ_STAFF' && sessionUserId ? sessionUserId : undefined;
+    if (targetChoice === 'PUBLIC_JOIN') {
+      return buildPublicJoinUrl(customId, activeBaseUrl, {
+        device: mobileMode ? 'mobile' : 'desktop',
+        openExternalBrowser: lineExternalMode,
+      });
+    }
     if (targetChoice === 'PUBLIC_CENTER') {
       return buildPublicMobileCenterUrl(activeBaseUrl, {
         openExternalBrowser: lineExternalMode,
@@ -243,7 +258,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
   }, [isOpen, generatedUrl]);
 
   const checkCloudRunHealth = async () => {
-    setHealthState({ status: 'checking', detail: '正在檢測公開 .run.app 網址連線狀態...' });
+    setHealthState({ status: 'checking', detail: `正在檢測正式公開主機 (${OFFICIAL_SHARED_APP_URL}) 連線狀態...` });
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 5000);
@@ -256,19 +271,19 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
       if (res.ok) {
         setHealthState({
           status: 'ok',
-          detail: '公開分享網址 (.run.app) 回應 HTTP 200 正常，外部手機與 Google 協作平台皆可開啟！',
+          detail: '正式公開主機 (Render) 回應 HTTP 200 正常，外部手機、LINE 掃碼與 Google 協作平台皆可直接開啟！',
         });
       } else {
         setHealthState({
           status: 'unreachable',
-          detail: `公開網址目前回應 HTTP ${res.status}（尚未完成對外公開發布或需改用 GAS /exec 獨立模式）。`,
+          detail: `正式主機目前回應 HTTP ${res.status}（免費方案若休眠中請等待約 20~40 秒喚醒後重測）。`,
         });
       }
     } catch {
       setHealthState({
         status: 'unreachable',
         detail:
-          '目前無法從外部連通公開 .run.app（可能尚未按過雲端平台「分享/部署」，建議直接使用 GAS /exec 網址對外推廣）。',
+          '目前無法從外部連通正式主機（免費方案可能正在喚醒中，請稍候再點「重新檢測」或先改用 GAS /exec 網址）。',
       });
     }
   };
@@ -314,15 +329,17 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
     ctx.fillRect(0, 0, canvas.width, 16);
 
     const roleLabel =
-      targetChoice === 'MEMBER'
-        ? '一般會員手機專用入口'
-        : targetChoice === 'STORE'
-          ? '一般營業店手機專用入口'
-          : targetChoice === 'CENTER'
-            ? '一般教育中心手機專用入口'
-            : targetChoice === 'HQ_STAFF'
-              ? '總部營運專屬安全入口'
-              : '企業智能雲端手機服務中心';
+      targetChoice === 'PUBLIC_JOIN'
+        ? '免登入掃碼入會 · 免費開通 AI 1+1'
+        : targetChoice === 'MEMBER'
+          ? '一般會員手機專用入口'
+          : targetChoice === 'STORE'
+            ? '一般營業店手機專用入口'
+            : targetChoice === 'CENTER'
+              ? '一般教育中心手機專用入口'
+              : targetChoice === 'HQ_STAFF'
+                ? '總部營運專屬安全入口'
+                : '企業智能雲端手機服務中心';
 
     ctx.fillStyle = '#1E293B';
     ctx.beginPath();
@@ -394,14 +411,15 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
     });
   };
 
-  const handleSaveAndPingGasBridge = async (testPing: boolean) => {
+  const handleSaveAndPingGasBridge = async (options: { testPing?: boolean; hydrateNow?: boolean }) => {
     if (!isHqStaff || bridgeBusy) return;
     setBridgeBusy(true);
     setBridgeFeedback(null);
     const res = await apiSaveAndTestHqGasBridge({
       gasWebAppUrl: bridgeUrlInput.trim(),
       autoSyncEnabled: bridgeAutoSync,
-      testPing,
+      testPing: Boolean(options.testPing),
+      hydrateNow: Boolean(options.hydrateNow),
     });
     setBridgeBusy(false);
     if (!res.ok) {
@@ -415,6 +433,16 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
       setBridgeState(res.state);
       setBridgeUrlInput(res.state.gasWebAppUrl);
       setBridgeAutoSync(res.state.autoSyncEnabled);
+      if (res.state.lastHydrationStatus) {
+        setHydrationFeedback(res.state.lastHydrationStatus);
+      }
+    }
+    if (res.hydrationResult) {
+      setHydrationFeedback(res.hydrationResult);
+    }
+    if (res.bootstrap) {
+      erpEngine.hydrateFromServer(res.bootstrap);
+      onHydrated?.();
     }
     if (res.pingResult) {
       setBridgeFeedback({
@@ -422,6 +450,12 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
         message: res.pingResult.message,
         timestamp: res.pingResult.timestamp,
         remoteStats: res.pingResult.remoteStats || null,
+      });
+    } else if (res.hydrationResult) {
+      setBridgeFeedback({
+        ok: res.hydrationResult.ok,
+        message: res.hydrationResult.message,
+        timestamp: res.hydrationResult.timestamp,
       });
     } else {
       setBridgeFeedback({
@@ -435,6 +469,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
   const roleChoices: Array<{ id: PublicTargetChoice; label: string }> =
     lockedPortalRole && lockedPortalRole !== 'HQ_STAFF'
       ? [
+          { id: 'PUBLIC_JOIN', label: '免登入掃碼入會頁' },
           {
             id: lockedPortalRole,
             label:
@@ -446,6 +481,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
           },
         ]
       : [
+          { id: 'PUBLIC_JOIN', label: '免登入掃碼入會頁' },
           { id: 'MEMBER', label: '一般會員入口' },
           { id: 'STORE', label: '一般營業店入口' },
           { id: 'CENTER', label: '一般教育中心入口' },
@@ -529,7 +565,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                 <div className="space-y-1">
                   <div className="font-bold">公開存取權限：任何人皆可透過連結開啟</div>
                   <p className="text-[11px] text-emerald-200/80 leading-relaxed">
-                    對外推廣、貼入 Google 協作平台或轉傳 LINE 給長輩使用時，請務必使用下方產生的「GAS /exec 網址」或「公開 .run.app 網址」，切勿直接複製瀏覽器上方的開發測試網址。
+                    已預設綁定您的正式公開主機（<span className="font-mono text-sky-300">{OFFICIAL_SHARED_APP_URL}</span>），可直接複製連結、下載掃碼立牌或貼入 LINE 推廣給新夥伴免登入入會。
                   </p>
                 </div>
               </div>
@@ -546,11 +582,11 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                   }`}
                 >
                   <div className="font-bold flex items-center justify-between">
-                    <span>系統公開網址 (.run.app)</span>
+                    <span>正式公開主機 (Render)</span>
                     {baseKind === 'cloudrun' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-1">
-                    AI Studio 部署公開發布網址
+                  <div className="text-[11px] text-slate-400 mt-1 font-mono truncate">
+                    erp-saas-system.onrender.com
                   </div>
                 </button>
                 <button
@@ -772,12 +808,12 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                 )}
               </div>
 
-              {/* Live .run.app reachability checker */}
+              {/* Live Render reachability checker */}
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-bold text-slate-100 flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                    <span>公開雲端網址 (.run.app) 即時連通狀態檢測</span>
+                    <span>正式公開主機 (Render) 即時連通狀態檢測</span>
                   </div>
                   <button
                     type="button"
@@ -889,10 +925,10 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                         <span>啟用交易自動雙寫至 GAS（註冊 / 100點核帳 / 月費 / 雙軌排線）</span>
                       </label>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => handleSaveAndPingGasBridge(false)}
+                          onClick={() => handleSaveAndPingGasBridge({})}
                           disabled={bridgeBusy}
                           className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold cursor-pointer disabled:opacity-50"
                         >
@@ -900,7 +936,16 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleSaveAndPingGasBridge(true)}
+                          onClick={() => handleSaveAndPingGasBridge({ hydrateNow: true })}
+                          disabled={bridgeBusy}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${bridgeBusy ? 'animate-spin' : ''}`} />
+                          <span>從試算表回讀同步</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveAndPingGasBridge({ testPing: true })}
                           disabled={bridgeBusy}
                           className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
                         >
@@ -909,6 +954,24 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {hydrationFeedback && (
+                      <div
+                        className={`p-2.5 rounded-lg border text-[11px] flex items-start gap-2 ${
+                          hydrationFeedback.ok
+                            ? 'bg-sky-950/40 border-sky-700/60 text-sky-200'
+                            : 'bg-amber-950/40 border-amber-700/60 text-amber-200'
+                        }`}
+                      >
+                        <Server className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <div className="font-bold">
+                            開機/手動試算表回讀狀態（{hydrationFeedback.source === 'startup' ? '開機自動回讀' : '總部手動回讀'}）
+                          </div>
+                          <div>{hydrationFeedback.message}</div>
+                        </div>
+                      </div>
+                    )}
 
                     {bridgeFeedback && (
                       <div
@@ -960,7 +1023,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  已自動將原本會發生 Page not found 的 <code className="text-rose-400">ais-dev</code> 改為公開 <code className="text-emerald-400">ais-pre</code>，並補齊攝影機掃碼權限（<code className="text-sky-300">allow=&quot;camera *&quot;</code>）與 GAS 網址參數轉傳。
+                  已自動綁定正式公開網址（<code className="text-emerald-400">{OFFICIAL_SHARED_APP_URL}</code>），並補齊攝影機掃碼權限（<code className="text-sky-300">allow=&quot;camera *&quot;</code>）與推薦人／入會網址參數轉傳。
                 </p>
                 <pre className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-300 overflow-x-auto max-h-44 leading-relaxed">
                   {CORRECTED_EMBED_HTML}

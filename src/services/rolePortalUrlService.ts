@@ -99,6 +99,8 @@ export interface ParsedPortalUrl {
   targetId: string | null;
   deviceMode: 'mobile' | 'desktop' | null;
   qrToken: string | null;
+  isPublicJoin: boolean;
+  sponsorMid: string | null;
 }
 
 function resolveSlugToRole(rawSlug: string | null | undefined): UserRole | null {
@@ -112,21 +114,34 @@ function resolveSlugToRole(rawSlug: string | null | undefined): UserRole | null 
 }
 
 /**
- * 解析當前網址列中的專屬角色入口與手機版參數：
- * 支援 `?portal=hq|member|store|center`、`?device=mobile` / `?mobile=1`
+ * 解析當前網址列中的專屬角色入口、免登入公開入會頁與手機版參數：
+ * 支援 `?portal=hq|member|store|center|join`、`?sponsor=A-00001`、`?device=mobile` / `?mobile=1`
  * 並同時擷取選填指定帳號參數 (`id`, `mid`, `storeId`, `centerId`, `staffId`) 與 `qrToken`
  */
 export function parsePortalFromUrl(): ParsedPortalUrl {
   if (typeof window === 'undefined') {
-    return { lockedRole: null, targetId: null, deviceMode: null, qrToken: null };
+    return {
+      lockedRole: null,
+      targetId: null,
+      deviceMode: null,
+      qrToken: null,
+      isPublicJoin: false,
+      sponsorMid: null,
+    };
   }
 
   try {
     const params = new URLSearchParams(window.location.search);
-    let lockedRole = resolveSlugToRole(params.get('portal'));
+    const rawPortal = (params.get('portal') || '').trim().toLowerCase();
+    const isPublicJoin =
+      rawPortal === 'join' ||
+      rawPortal === 'register' ||
+      params.get('join') === '1';
+
+    let lockedRole = resolveSlugToRole(rawPortal);
 
     // Also tolerate hash-style portal indicator like #/member or #portal=member
-    if (!lockedRole && window.location.hash) {
+    if (!lockedRole && !isPublicJoin && window.location.hash) {
       const cleanedHash = window.location.hash.replace(/^#\/?/, '');
       if (cleanedHash.startsWith('portal=')) {
         lockedRole = resolveSlugToRole(cleanedHash.slice('portal='.length).split('&')[0]);
@@ -144,6 +159,10 @@ export function parsePortalFromUrl(): ParsedPortalUrl {
 
     const targetId = targetIdRaw && targetIdRaw.trim() ? targetIdRaw.trim() : null;
 
+    const sponsorRaw = params.get('sponsor') || params.get('ref');
+    const sponsorMid =
+      sponsorRaw && sponsorRaw.trim() ? sponsorRaw.trim().toUpperCase() : null;
+
     const deviceParam = (params.get('device') || params.get('view') || '').trim().toLowerCase();
     const mobileFlag = params.get('mobile');
     let deviceMode: 'mobile' | 'desktop' | null = null;
@@ -156,9 +175,16 @@ export function parsePortalFromUrl(): ParsedPortalUrl {
     const qrTokenRaw = params.get('qrToken');
     const qrToken = qrTokenRaw && qrTokenRaw.trim() ? qrTokenRaw.trim() : null;
 
-    return { lockedRole, targetId, deviceMode, qrToken };
+    return { lockedRole, targetId, deviceMode, qrToken, isPublicJoin, sponsorMid };
   } catch {
-    return { lockedRole: null, targetId: null, deviceMode: null, qrToken: null };
+    return {
+      lockedRole: null,
+      targetId: null,
+      deviceMode: null,
+      qrToken: null,
+      isPublicJoin: false,
+      sponsorMid: null,
+    };
   }
 }
 
@@ -210,7 +236,7 @@ export const OFFICIAL_GAS_EXEC_URL =
   'https://script.google.com/macros/s/AKfycbxMB3G4rw8h1SqJnlyoCgE7xuGn6Fpc2QSJa1m3xVzyVXosb10fXrWoHkf87_V0nxJb/exec';
 
 export const OFFICIAL_SHARED_APP_URL =
-  'https://ais-pre-fmr4xyg7okjnqrqpw3sdig-615655728389.asia-northeast1.run.app';
+  'https://erp-saas-system.onrender.com';
 
 const SAVED_EXTERNAL_BASE_URL_KEY = 'ais_custom_external_base_url';
 export const EXTERNAL_BASE_URL_UPDATED_EVENT = 'ais-external-base-url-updated';
@@ -346,6 +372,29 @@ export function buildPublicMobileCenterUrl(
   const originAndPath = normalizeBaseUrlForQuery(baseUrl);
   const params = new URLSearchParams();
   params.set('device', 'mobile');
+  if (options?.openExternalBrowser) {
+    params.set('openExternalBrowser', '1');
+  }
+  return `${originAndPath}?${params.toString()}`;
+}
+
+/**
+ * 產生「免登入公開掃碼入會表單」專屬網址（自動帶入直推推薦人 MID）
+ */
+export function buildPublicJoinUrl(
+  sponsorMid?: string,
+  baseUrl?: string,
+  options?: { device?: 'mobile' | 'desktop'; openExternalBrowser?: boolean }
+): string {
+  const originAndPath = normalizeBaseUrlForQuery(baseUrl || OFFICIAL_SHARED_APP_URL);
+  const params = new URLSearchParams();
+  params.set('portal', 'join');
+  if (sponsorMid && sponsorMid.trim()) {
+    params.set('sponsor', sponsorMid.trim().toUpperCase());
+  }
+  if (options?.device !== 'desktop') {
+    params.set('device', 'mobile');
+  }
   if (options?.openExternalBrowser) {
     params.set('openExternalBrowser', '1');
   }

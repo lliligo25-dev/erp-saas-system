@@ -23,10 +23,13 @@ import {
   verifyQrLoginToken,
 } from './server/authSecurity.ts';
 import {
+  fetchGasHydrationState,
   forwardErpEventToGas,
   getGasBridgeState,
   pingGasBridge,
+  setGasHydrationStatus,
   updateGasBridgeConfig,
+  type GasHydrationStatus,
 } from './server/services/gasBridgeForwarder.ts';
 import { buildProjectSourceZip } from './server/services/projectZipExporter.ts';
 import type { AuthSession, UserRole } from './src/types/erp.ts';
@@ -36,6 +39,8 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 
 // Simple in-memory login rate limiter (brute-force protection)
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+// Dedicated public registration rate limiter (spam protection: max 10 / 10 mins per IP)
+const publicRegisterAttempts = new Map<string, { count: number; resetAt: number }>();
 
 function checkLoginRateLimit(ip: string): boolean {
   const now = Date.now();
@@ -49,6 +54,62 @@ function checkLoginRateLimit(ip: string): boolean {
   }
   entry.count += 1;
   return true;
+}
+
+function checkPublicRegisterRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = publicRegisterAttempts.get(ip);
+  if (!entry || entry.resetAt < now) {
+    publicRegisterAttempts.set(ip, { count: 1, resetAt: now + 600_000 });
+    return true;
+  }
+  if (entry.count >= 10) {
+    return false;
+  }
+  entry.count += 1;
+  return true;
+}
+
+function sanitizePublicText(val: unknown, maxLen: number): string {
+  if (typeof val !== 'string') return '';
+  return val
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .trim()
+    .slice(0, maxLen);
+}
+
+async function hydrateEngineFromGas(trigger: 'startup' | 'manual'): Promise<GasHydrationStatus> {
+  const fetched = await fetchGasHydrationState();
+  const nowIso = new Date().toISOString();
+  if (!fetched.ok || !fetched.data) {
+    const failed: GasHydrationStatus = {
+      ok: false,
+      message: fetched.error || '無法從 GAS 試算表回讀資料',
+      timestamp: nowIso,
+      importedMembers: 0,
+      importedMonoline: 0,
+      importedBinary: 0,
+      importedContacts: 0,
+      importedTrackings: 0,
+    };
+    setGasHydrationStatus(failed);
+    if (trigger === 'startup') {
+      console.log(`[GAS Cold-Start Hydration] Skipped/Waiting: ${failed.message}`);
+    }
+    return failed;
+  }
+
+  const counts = serverErpEngine.hydrateFromGasExport(fetched.data);
+  const status: GasHydrationStatus = {
+    ok: true,
+    spreadsheetName: fetched.data.spreadsheetName,
+    message: `✅ 已從試算表「${fetched.data.spreadsheetName || 'Google Sheets'}」回讀 ${counts.importedMembers} 位會員、${counts.importedMonoline} 個單軌節點、${counts.importedBinary} 個雙軌節點`,
+    timestamp: nowIso,
+    ...counts,
+  };
+  setGasHydrationStatus(status);
+  console.log(`[GAS Hydration (${trigger})] ${status.message}`);
+  return status;
 }
 
 interface AuthedRequest extends Request {
@@ -98,6 +159,116 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ ok: true, securityMode: 'SERVER_CONFIDENTIAL_SEPARATION' });
+  });
+
+  // 0. Public Unauthenticated Onboarding Routes (Strict Input Validation + Rate Limit, Zero PII Leakage)
+  app.get('/api/public/sponsor-info', (req, res) => {
+    const rawSponsor = typeof req.query.sponsor === 'string' ? req.query.sponsor : '';
+    const info = serverErpEngine.getPublicSponsorInfo(sanitizePublicText(rawSponsor, 24));
+    res.json({ ok: true, ...info });
+  });
+
+  app.post('/api/public/register', (req, res) => {
+    const clientIp = req.ip || 'unknown';
+    if (!checkPublicRegisterRateLimit(clientIp)) {
+      res.status(429).json({
+        ok: false,
+        error: '短時間內送出次數過多，請稍候 10 分鐘再試或聯繫您的推薦人協助。',
+      });
+      return;
+    }
+
+    const body = (req.body || {}) as Record<string, unknown>;
+    const name = sanitizePublicText(body.name, 50);
+    const phone = sanitizePublicText(body.phone, 20);
+    const tel = sanitizePublicText(body.tel, 25);
+    const line = sanitizePublicText(body.line, 50);
+    const email = sanitizePublicText(body.email, 100);
+    const address = sanitizePublicText(body.address, 150);
+    const idNumberMasked = sanitizePublicText(body.idNumberMasked, 20);
+    const rawSponsor = sanitizePublicText(body.sponsorMid, 24).toUpperCase();
+    const storeId = sanitizePublicText(body.storeId, 30) || 'S-TAIPEI-01';
+    const centerId = sanitizePublicText(body.centerId, 30) || 'EDU-GLOBAL-01';
+    const activateBookingSystem = body.activateBookingSystem !== false;
+
+    if (!name || name.length < 1) {
+      res.status(400).json({ ok: false, error: '請填寫您的真實姓名' });
+      return;
+    }
+    const phoneDigits = phone.replace(/[\s\-+()]/g, '');
+    if (!phoneDigits || !/^\d{8,15}$/.test(phoneDigits)) {
+      res.status(400).json({ ok: false, error: '請輸入正確的手機號碼（例如 0912345678）' });
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ ok: false, error: 'Email 格式不正確，請重新確認或留空' });
+      return;
+    }
+
+    const sponsorInfo = serverErpEngine.getPublicSponsorInfo(rawSponsor);
+
+    try {
+      const result = serverErpEngine.registerNewMember({
+        name,
+        phone,
+        tel,
+        line,
+        email,
+        address,
+        idNumberMasked,
+        sponsorMid: sponsorInfo.sponsorMid,
+        storeId,
+        centerId,
+        discussionContent: `公開掃碼自助入會開通 AI 軟體 1+1（推薦人：${sponsorInfo.sponsorMid}）`,
+        nextStepPlan: '使用核發的會員編號登入個人工作台，開始 30 天免費體驗',
+        activateBookingSystem,
+      });
+
+      void forwardErpEventToGas('register', {
+        mid: result.member.mid,
+        name: result.member.name,
+        phone: result.member.phone,
+        tel: result.member.tel,
+        line: result.member.line,
+        email: result.member.email,
+        address: result.member.address,
+        photoUrl: result.member.photoUrl,
+        idNumberMasked: result.member.idNumberMasked,
+        sponsorMid: result.member.sponsorMid,
+        storeId: result.member.storeId,
+        centerId: result.member.centerId,
+        registeredAt: result.member.registeredAt,
+        trialExpiresAt: result.member.trialExpiresAt,
+        monolineNodeId: result.monolineNode?.nodeId || result.member.monolineNodeId,
+        monolineParentId: result.monolineNode?.parentId,
+        monolineDepth: result.monolineNode?.depth,
+        binaryNodeId: result.binaryNode?.nodeId || result.member.binaryNodeId,
+        binaryParentId: result.binaryNode?.parentId,
+        binaryPosition: result.binaryNode?.placementPosition,
+        binaryDepth: result.binaryNode?.depth,
+        contactId: result.contact?.id || result.member.contactId,
+        trackingId: result.contactTracking?.id,
+        discussionContent: result.contactTracking?.discussionContent,
+        nextStepPlan: result.contactTracking?.nextStepPlan,
+      });
+
+      res.json({
+        ok: true,
+        registration: {
+          mid: result.member.mid,
+          name: result.member.name,
+          phone: result.member.phone,
+          sponsorMid: result.member.sponsorMid,
+          monolineNodeId: result.monolineNode.nodeId,
+          binaryNodeId: result.binaryNode.nodeId,
+          trialExpiresAt: result.member.trialExpiresAt,
+          bookingLicenseId: result.bookingProfile?.licenseId || null,
+        },
+        message: '恭喜您完成開通！系統已核發您的專屬會員編號與 1+1 AI 軟體 30 天體驗資格。',
+      });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || '入會開通處理失敗，請稍後再試' });
+    }
   });
 
   // 1. Server-side Confidential Authentication
@@ -276,11 +447,12 @@ async function startServer() {
     res.json({ ok: true, state: getGasBridgeState() });
   });
 
-  app.post('/api/hq/gas-bridge', requireHqRole, async (req, res) => {
-    const { gasWebAppUrl, autoSyncEnabled, testPing } = (req.body || {}) as {
+  app.post('/api/hq/gas-bridge', requireHqRole, async (req: AuthedRequest, res) => {
+    const { gasWebAppUrl, autoSyncEnabled, testPing, hydrateNow } = (req.body || {}) as {
       gasWebAppUrl?: string;
       autoSyncEnabled?: boolean;
       testPing?: boolean;
+      hydrateNow?: boolean;
     };
     const updated = updateGasBridgeConfig({ gasWebAppUrl, autoSyncEnabled });
     if (!updated.ok) {
@@ -288,10 +460,17 @@ async function startServer() {
       return;
     }
     const pingResult = testPing ? await pingGasBridge() : null;
+    const hydrationResult = hydrateNow ? await hydrateEngineFromGas('manual') : null;
+    const bootstrap =
+      hydrateNow && req.erpSession
+        ? serverErpEngine.getScopedBootstrap(req.erpSession)
+        : undefined;
     res.json({
       ok: true,
       state: getGasBridgeState(),
       pingResult,
+      hydrationResult,
+      bootstrap,
     });
   });
 
@@ -508,11 +687,31 @@ async function startServer() {
       // Non-blocking real-time dual-write forward to configured GAS /exec Web App
       if (action === 'registerNewMember' && result?.member) {
         void forwardErpEventToGas('register', {
+          mid: result.member.mid,
           name: result.member.name,
           phone: result.member.phone,
+          tel: result.member.tel,
+          line: result.member.line,
+          email: result.member.email,
+          address: result.member.address,
+          photoUrl: result.member.photoUrl,
+          idNumberMasked: result.member.idNumberMasked,
           sponsorMid: result.member.sponsorMid,
           storeId: result.member.storeId,
           centerId: result.member.centerId,
+          registeredAt: result.member.registeredAt,
+          trialExpiresAt: result.member.trialExpiresAt,
+          monolineNodeId: result.monolineNode?.nodeId || result.member.monolineNodeId,
+          monolineParentId: result.monolineNode?.parentId,
+          monolineDepth: result.monolineNode?.depth,
+          binaryNodeId: result.binaryNode?.nodeId || result.member.binaryNodeId,
+          binaryParentId: result.binaryNode?.parentId,
+          binaryPosition: result.binaryNode?.placementPosition,
+          binaryDepth: result.binaryNode?.depth,
+          contactId: result.contact?.id || result.member.contactId,
+          trackingId: result.contactTracking?.id,
+          discussionContent: result.contactTracking?.discussionContent || data.discussionContent,
+          nextStepPlan: result.contactTracking?.nextStepPlan || data.nextStepPlan,
         });
       } else if (action === 'execute100PointsClosedLoopSettlement' && result) {
         void forwardErpEventToGas('settle', {
@@ -527,7 +726,14 @@ async function startServer() {
       } else if (action === 'allocateBinaryNodeForSoftware' && result?.binaryNode) {
         void forwardErpEventToGas('allocateSoftwareBinaryNode', {
           memberMid: result.binaryNode.mid,
-          softwareTitle: data.softwareTitle || 'AI 雙軌模組',
+          binaryNodeId: result.binaryNode.nodeId,
+          parentId: result.binaryNode.parentId,
+          position: result.binaryNode.placementPosition,
+          depth: result.binaryNode.depth,
+          sponsorMid: result.binaryNode.sponsorMid,
+          status: result.binaryNode.status,
+          expiresAt: result.binaryNode.trialExpiresAt,
+          softwareTitle: data.softwareTitle || result.binaryNode.softwareTitle || 'AI 雙軌模組',
           executeSettlement: Boolean(data.executeSettlement),
         });
       }
@@ -559,6 +765,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Confidential ERP Server] Listening on http://0.0.0.0:${PORT} (mode=${IS_PROD ? 'production' : 'development'})`);
+    // Non-blocking cold-start hydration from Google Sheets (prevents Render free-tier sleep data reset)
+    void hydrateEngineFromGas('startup');
   });
 }
 

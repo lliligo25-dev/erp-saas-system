@@ -52,15 +52,15 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
   onNavigateToCrmEvents,
   onNavigateToMemberPortal,
 }) => {
-  // Member & CRM Contact Fields (Mapped to CONTACT_M & CONTACT_T)
-  const [name, setName] = useState(prefillClient?.name || '王大明');
-  const [phone, setPhone] = useState(prefillClient?.phone || '0912-345-678');
-  const [tel, setTel] = useState('02-2771-9900');
-  const [line, setLine] = useState(prefillClient?.line || 'wang_daming');
-  const [email, setEmail] = useState('daming.wang@example.com');
-  const [address, setAddress] = useState('台北市大安區忠孝東路四段 128 號 12 樓');
-  const [photoUrl, setPhotoUrl] = useState('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80');
-  const [idNumberMasked, setIdNumberMasked] = useState('A123***789');
+  // Member & CRM Contact Fields (Formal Blank Form by Default — Mapped to CONTACT_M & CONTACT_T)
+  const [name, setName] = useState(prefillClient?.name || '');
+  const [phone, setPhone] = useState(prefillClient?.phone || '');
+  const [tel, setTel] = useState('');
+  const [line, setLine] = useState(prefillClient?.line || '');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [idNumberMasked, setIdNumberMasked] = useState('');
 
   // Hierarchy bindings
   const [sponsorMid, setSponsorMid] = useState(
@@ -87,9 +87,9 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
     }
   }, [lockedSponsorMid]);
 
-  // Tracking fields (Mapped to CONTACT_T)
-  const [discussionContent, setDiscussionContent] = useState('新會員開通 AI 軟體 1+1 + 個人預約系統，準備進行 30 天免費體驗。');
-  const [nextStepPlan, setNextStepPlan] = useState('引導登入 AI 軟體系統體驗 15 代公排互助與個人預約系統，邀約參加 EM-00001 實體啟航會。');
+  // Tracking fields (Mapped to CONTACT_T; optional blank by default)
+  const [discussionContent, setDiscussionContent] = useState('');
+  const [nextStepPlan, setNextStepPlan] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<{
@@ -111,9 +111,37 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
     '鄭雅芳', '謝建國', '洪鈺涵', '郭承翰', '曾靜怡'
   ];
 
+  const handleClearForm = () => {
+    setName('');
+    setPhone('');
+    setTel('');
+    setLine('');
+    setEmail('');
+    setAddress('');
+    setPhotoUrl('');
+    setIdNumberMasked('');
+    setDiscussionContent('');
+    setNextStepPlan('');
+  };
+
+  const handleFillTestSample = () => {
+    const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
+    const rand8 = Math.floor(10000000 + Math.random() * 90000000);
+    setName(randomName);
+    setPhone(`09${rand8}`);
+    setTel(`02-${Math.floor(20000000 + Math.random() * 70000000)}`);
+    setLine(`demo_${rand8.toString().slice(0, 4)}`);
+    setEmail(`demo${rand8.toString().slice(0, 4)}@example.com`);
+    setAddress('台北市大安區忠孝東路四段 128 號');
+    setPhotoUrl('');
+    setIdNumberMasked(`A1${rand8.toString().slice(0, 3)}***${rand8.toString().slice(5, 8)}`);
+    setDiscussionContent('測試開通 AI 軟體 1+1 與 30 天免費體驗。');
+    setNextStepPlan('引導登入個人工作台並測試試算表同步。');
+  };
+
   const handleSingleRegister = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !phone.trim()) return;
 
     setIsSubmitting(true);
     setTimeout(() => {
@@ -138,14 +166,8 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
       setIsSubmitting(false);
       onNodeCreated();
 
-      // Pick next random name and reset fields
-      const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-      setName(randomName);
-      setPhone(`09${Math.floor(10000000 + Math.random() * 90000000)}`);
-      setTel(`02-${Math.floor(20000000 + Math.random() * 70000000)}`);
-      setLine(`${randomName.toLowerCase().replace(/\s+/g, '_')}_line`);
-      setEmail(`member${Math.floor(Math.random() * 9000 + 1000)}@ai-saas.tw`);
-      setIdNumberMasked(`A1${Math.floor(10000000 + Math.random() * 90000000).toString().substring(0, 3)}***`);
+      // 開通完成後恢復正式空白表單，避免誤把上一位或測試資料再次送出
+      handleClearForm();
     }, 150);
   };
 
@@ -218,10 +240,32 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
         {/* Left: Input Form */}
         <div className="lg:col-span-5 space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400" />
-              <span>填寫開通資料 (AI 軟體 1+1 & CRM 通訊主檔)</span>
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+                <span>填寫開通資料 (正式空白表單)</span>
+              </h3>
+              <div className="flex items-center gap-1.5">
+                {!scopedMemberMode && (
+                  <button
+                    type="button"
+                    onClick={handleFillTestSample}
+                    className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-amber-300 cursor-pointer transition-colors"
+                  >
+                    帶入測試範例
+                  </button>
+                )}
+                {(name || phone || tel || line || email || address || idNumberMasked) && (
+                  <button
+                    type="button"
+                    onClick={handleClearForm}
+                    className="px-2.5 py-1 rounded-md bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[11px] font-semibold text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
+                  >
+                    清空
+                  </button>
+                )}
+              </div>
+            </div>
 
             <form onSubmit={handleSingleRegister} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
