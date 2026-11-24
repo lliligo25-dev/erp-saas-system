@@ -61,6 +61,18 @@ export class ERPEngine {
   private stores: Map<string, StoreRecord> = new Map();
   private centers: Map<string, EducationCenterRecord> = new Map();
   private settlements: SettlementBreakdown[] = [];
+  private hqDbAuditLogs: Array<{
+    id: string;
+    timestamp: string;
+    operatorId: string;
+    operatorName: string;
+    action: 'UPDATE_MEMBER' | 'DELETE_MEMBER' | 'UPDATE_NODE' | 'DELETE_NODE';
+    targetType: 'MEMBER' | 'MONOLINE_NODE' | 'BINARY_NODE';
+    targetId: string;
+    summary: string;
+    gasSyncOk?: boolean;
+    gasSyncMessage?: string;
+  }> = [];
   
   // 1. 通訊錄 CRM (CONTACT_M, CONTACT_T)
   private contacts: Map<string, ContactMasterRecord> = new Map();
@@ -150,6 +162,7 @@ export class ERPEngine {
           this.publicSafetyAccumulated = parsed.publicSafetyAccumulated || 0;
           this.abanyTechAccumulated = parsed.abanyTechAccumulated || 0;
           this.hqOpsAccumulated = parsed.hqOpsAccumulated || 0;
+          this.hqDbAuditLogs = Array.isArray(parsed.hqDbAuditLogs) ? parsed.hqDbAuditLogs.slice(0, 200) : [];
 
           if (this.purgeLegacyVirtualDemoData()) {
             this.saveState();
@@ -965,6 +978,7 @@ export class ERPEngine {
         publicSafetyAccumulated: this.publicSafetyAccumulated,
         abanyTechAccumulated: this.abanyTechAccumulated,
         hqOpsAccumulated: this.hqOpsAccumulated,
+        hqDbAuditLogs: this.hqDbAuditLogs.slice(0, 200),
       };
       if (!fs.existsSync(SERVER_DATA_DIR)) {
         fs.mkdirSync(SERVER_DATA_DIR, { recursive: true });
@@ -3779,6 +3793,460 @@ export class ERPEngine {
       importedBinary,
       importedContacts,
       importedTrackings,
+    };
+  }
+
+  // ============================================================================
+  // 總部最高權限資料庫直接維護介面 (HQ Super Admin DB Management & Audit Trail)
+  // ============================================================================
+
+  private recordHqAudit(entry: {
+    operatorId: string;
+    operatorName: string;
+    action: 'UPDATE_MEMBER' | 'DELETE_MEMBER' | 'UPDATE_NODE' | 'DELETE_NODE';
+    targetType: 'MEMBER' | 'MONOLINE_NODE' | 'BINARY_NODE';
+    targetId: string;
+    summary: string;
+  }) {
+    const record = {
+      id: `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      timestamp: new Date().toISOString(),
+      ...entry,
+    };
+    this.hqDbAuditLogs.unshift(record);
+    if (this.hqDbAuditLogs.length > 200) {
+      this.hqDbAuditLogs = this.hqDbAuditLogs.slice(0, 200);
+    }
+    return record;
+  }
+
+  public updateAuditLogGasSync(auditId: string, gasSyncOk: boolean, gasSyncMessage: string): void {
+    const found = this.hqDbAuditLogs.find((item) => item.id === auditId);
+    if (found) {
+      found.gasSyncOk = gasSyncOk;
+      found.gasSyncMessage = gasSyncMessage;
+      this.saveState();
+    }
+  }
+
+  public getHqDbOverview() {
+    const members = Array.from(this.members.values()).sort((a, b) => a.mid.localeCompare(b.mid));
+    const monolineNodes = Array.from(this.monolineNodes.values()).sort((a, b) => a.depth - b.depth || a.nodeId.localeCompare(b.nodeId));
+    const binaryNodes = Array.from(this.binaryNodes.values()).sort((a, b) => a.depth - b.depth || a.nodeId.localeCompare(b.nodeId));
+    const stores = Array.from(this.stores.values()).map((s) => ({ storeId: s.storeId, name: s.name }));
+    const centers = Array.from(this.centers.values()).map((c) => ({ centerId: c.centerId, name: c.name }));
+    return {
+      members,
+      monolineNodes,
+      binaryNodes,
+      stores,
+      centers,
+      auditLogs: this.hqDbAuditLogs.slice(0, 100),
+    };
+  }
+
+  public hqUpdateMember(
+    rawMid: string,
+    rawUpdates: Record<string, unknown>,
+    operator: { userId: string; displayName: string }
+  ) {
+    const mid = String(rawMid || '').trim().toUpperCase();
+    const existing = this.members.get(mid);
+    if (!existing) {
+      throw new Error(`找不到會員編號 ${mid}`);
+    }
+
+    const cleanStr = (v: unknown, maxLen: number): string =>
+      typeof v === 'string' ? v.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, maxLen) : '';
+
+    const changes: string[] = [];
+    const next: Member = { ...existing };
+
+    if (rawUpdates.name !== undefined) {
+      const name = cleanStr(rawUpdates.name, 60);
+      if (!name) throw new Error('會員姓名不可為空白');
+      if (name !== existing.name) {
+        changes.push(`姓名: ${existing.name} → ${name}`);
+        next.name = name;
+      }
+    }
+
+    if (rawUpdates.phone !== undefined) {
+      let phone = cleanStr(rawUpdates.phone, 25);
+      if (/^9\d{8}$/.test(phone)) phone = `0${phone}`;
+      if (phone !== existing.phone) {
+        changes.push(`手機: ${existing.phone || '空'} → ${phone || '空'}`);
+        next.phone = phone;
+      }
+    }
+
+    if (rawUpdates.idNumberMasked !== undefined) {
+      const idVal = cleanStr(rawUpdates.idNumberMasked, 25).toUpperCase();
+      if (idVal !== existing.idNumberMasked) {
+        changes.push(`身分證/證號已更新`);
+        next.idNumberMasked = idVal;
+      }
+    }
+
+    if (rawUpdates.sponsorMid !== undefined) {
+      const sponsorMid = cleanStr(rawUpdates.sponsorMid, 24).toUpperCase();
+      if (sponsorMid && sponsorMid !== existing.sponsorMid) {
+        changes.push(`推薦人: ${existing.sponsorMid} → ${sponsorMid}`);
+        next.sponsorMid = sponsorMid;
+      }
+    }
+
+    if (rawUpdates.storeId !== undefined) {
+      const storeId = cleanStr(rawUpdates.storeId, 30);
+      if (storeId && storeId !== existing.storeId) {
+        changes.push(`經營店: ${existing.storeId} → ${storeId}`);
+        next.storeId = storeId;
+      }
+    }
+
+    if (rawUpdates.centerId !== undefined) {
+      const centerId = cleanStr(rawUpdates.centerId, 30);
+      if (centerId && centerId !== existing.centerId) {
+        changes.push(`教育中心: ${existing.centerId} → ${centerId}`);
+        next.centerId = centerId;
+      }
+    }
+
+    if (rawUpdates.trialExpiresAt !== undefined) {
+      const rawDate = cleanStr(rawUpdates.trialExpiresAt, 40);
+      if (rawDate) {
+        const parsed = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(rawDate)
+          ? new Date(rawDate.replace(' ', 'T') + '+08:00')
+          : /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+            ? new Date(`${rawDate}T23:59:59+08:00`)
+            : new Date(rawDate);
+        if (isNaN(parsed.getTime())) {
+          throw new Error('到期日時間格式無效');
+        }
+        const iso = parsed.toISOString();
+        if (iso !== existing.trialExpiresAt) {
+          changes.push(`到期日已調整`);
+          next.trialExpiresAt = iso;
+        }
+      }
+    }
+
+    if (rawUpdates.accumulatedRentAmount !== undefined) {
+      const num = Number(rawUpdates.accumulatedRentAmount);
+      if (!Number.isFinite(num) || num < 0 || num > 10_000_000) {
+        throw new Error('零錢池金額必須為 0 以上之有效數字');
+      }
+      if (num !== existing.accumulatedRentAmount) {
+        changes.push(`零錢池: ${existing.accumulatedRentAmount} → ${num}`);
+        next.accumulatedRentAmount = num;
+      }
+    }
+
+    if (rawUpdates.tel !== undefined) next.tel = cleanStr(rawUpdates.tel, 25);
+    if (rawUpdates.line !== undefined) next.line = cleanStr(rawUpdates.line, 50);
+    if (rawUpdates.email !== undefined) {
+      const email = cleanStr(rawUpdates.email, 100);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error('Email 格式不正確');
+      }
+      next.email = email;
+    }
+    if (rawUpdates.address !== undefined) next.address = cleanStr(rawUpdates.address, 150);
+
+    this.members.set(mid, next);
+
+    // 同步更新通訊主檔對應姓名與手機（若存在）
+    if (next.contactId && this.contacts.has(next.contactId)) {
+      const c = this.contacts.get(next.contactId)!;
+      c.name = next.name;
+      c.phone = next.phone;
+      c.tel = next.tel || c.tel;
+      c.line = next.line || c.line;
+      c.email = next.email || c.email;
+      c.address = next.address || c.address;
+      c.updatedAt = new Date().toISOString();
+    }
+
+    const auditEntry = this.recordHqAudit({
+      operatorId: operator.userId,
+      operatorName: operator.displayName,
+      action: 'UPDATE_MEMBER',
+      targetType: 'MEMBER',
+      targetId: mid,
+      summary: changes.length > 0 ? changes.join('；') : '更新聯絡欄位',
+    });
+
+    this.saveState();
+    return { member: next, auditEntry };
+  }
+
+  public hqDeleteMember(
+    rawMid: string,
+    options: { deleteLinkedNodes?: boolean },
+    operator: { userId: string; displayName: string }
+  ) {
+    const mid = String(rawMid || '').trim().toUpperCase();
+    if (mid === GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID) {
+      throw new Error(`系統核心錨點 ${mid} 受到保護，禁止刪除`);
+    }
+    const existing = this.members.get(mid);
+    if (!existing) {
+      throw new Error(`找不到會員編號 ${mid}`);
+    }
+
+    const deleteLinkedNodes = Boolean(options.deleteLinkedNodes);
+    const deletedMonolineIds: string[] = [];
+    const deletedBinaryIds: string[] = [];
+
+    if (deleteLinkedNodes) {
+      // 先檢查該會員名下所有雙軌節點是否帶有下線，若有則禁止連帶刪除以免破壞組織樹結構
+      const ownedBinaryNodes = Array.from(this.binaryNodes.values()).filter(
+        (n) => n.mid === mid && n.nodeId !== GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
+      );
+      for (const bn of ownedBinaryNodes) {
+        if (bn.leftChildId || bn.rightChildId) {
+          throw new Error(
+            `無法連帶刪除雙軌節點 ${bn.nodeId}：該節點下方已有安置子節點（${[bn.leftChildId, bn.rightChildId].filter(Boolean).join(' / ')}），請先移除下線葉節點或取消勾選「連帶刪除節點」`
+          );
+        }
+      }
+
+      for (const bn of ownedBinaryNodes) {
+        const parent = this.binaryNodes.get(bn.parentId);
+        if (parent) {
+          if (parent.leftChildId === bn.nodeId) parent.leftChildId = undefined;
+          if (parent.rightChildId === bn.nodeId) parent.rightChildId = undefined;
+        }
+        this.binaryNodes.delete(bn.nodeId);
+        deletedBinaryIds.push(bn.nodeId);
+      }
+
+      const ownedMonoNodes = Array.from(this.monolineNodes.values()).filter((n) => n.mid === mid);
+      for (const mn of ownedMonoNodes) {
+        for (const other of this.monolineNodes.values()) {
+          if (other.parentId === mn.nodeId) {
+            other.parentId = mn.parentId;
+          }
+        }
+        this.monolineNodes.delete(mn.nodeId);
+        deletedMonolineIds.push(mn.nodeId);
+      }
+      if (deletedMonolineIds.length > 0) {
+        const sortedMono = Array.from(this.monolineNodes.values()).sort((a, b) => a.depth - b.depth);
+        sortedMono.forEach((n, idx) => {
+          n.depth = idx + 1;
+        });
+      }
+    }
+
+    this.members.delete(mid);
+    this.bookingProfiles.delete(mid);
+    this.recomputeCounters();
+
+    const auditEntry = this.recordHqAudit({
+      operatorId: operator.userId,
+      operatorName: operator.displayName,
+      action: 'DELETE_MEMBER',
+      targetType: 'MEMBER',
+      targetId: mid,
+      summary: `刪除會員 ${existing.name}${
+        deletedMonolineIds.length || deletedBinaryIds.length
+          ? `（連帶移除節點：${[...deletedMonolineIds, ...deletedBinaryIds].join(', ')}）`
+          : '（保留原組織節點）'
+      }`,
+    });
+
+    this.saveState();
+    return {
+      deletedMid: mid,
+      deletedName: existing.name,
+      deletedMonolineIds,
+      deletedBinaryIds,
+      auditEntry,
+    };
+  }
+
+  public hqUpdateNode(
+    track: 'MONOLINE' | 'BINARY',
+    rawNodeId: string,
+    rawUpdates: Record<string, unknown>,
+    operator: { userId: string; displayName: string }
+  ) {
+    const nodeId = String(rawNodeId || '').trim().toUpperCase();
+    const map = track === 'MONOLINE' ? this.monolineNodes : this.binaryNodes;
+    const existing = map.get(nodeId);
+    if (!existing) {
+      throw new Error(`找不到${track === 'MONOLINE' ? '單軌' : '雙軌'}節點 ${nodeId}`);
+    }
+
+    const VALID_STATUSES = new Set<NodeStatus>([
+      'HQ_LOCKED',
+      'TRIAL_ACTIVE',
+      'ACTIVE_RENEWED',
+      'EXPIRED_FROZEN',
+    ]);
+    const cleanStr = (v: unknown, maxLen: number): string =>
+      typeof v === 'string' ? v.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, maxLen) : '';
+
+    const changes: string[] = [];
+    const next: NodeRecord = { ...existing };
+
+    if (rawUpdates.name !== undefined) {
+      const name = cleanStr(rawUpdates.name, 80);
+      if (!name) throw new Error('節點顯示名稱不可為空白');
+      if (name !== existing.name) {
+        changes.push(`名稱: ${existing.name} → ${name}`);
+        next.name = name;
+      }
+    }
+
+    if (rawUpdates.status !== undefined) {
+      const status = cleanStr(rawUpdates.status, 30).toUpperCase() as NodeStatus;
+      if (!VALID_STATUSES.has(status)) {
+        throw new Error(`無效的節點狀態：${status}`);
+      }
+      if (nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID && status !== 'HQ_LOCKED') {
+        throw new Error('雙軌定海神針 C-25000001 必須維持 HQ_LOCKED 永久鎖定狀態');
+      }
+      if (status !== existing.status) {
+        changes.push(`狀態: ${existing.status} → ${status}`);
+        next.status = status;
+        next.hqPermanentLocked = status === 'HQ_LOCKED';
+      }
+    }
+
+    if (rawUpdates.sponsorMid !== undefined) {
+      const sponsorMid = cleanStr(rawUpdates.sponsorMid, 24).toUpperCase();
+      if (sponsorMid && sponsorMid !== existing.sponsorMid) {
+        changes.push(`推薦人: ${existing.sponsorMid} → ${sponsorMid}`);
+        next.sponsorMid = sponsorMid;
+      }
+    }
+
+    if (rawUpdates.trialExpiresAt !== undefined) {
+      const rawDate = cleanStr(rawUpdates.trialExpiresAt, 40);
+      if (rawDate) {
+        const parsed = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(rawDate)
+          ? new Date(rawDate.replace(' ', 'T') + '+08:00')
+          : /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+            ? new Date(`${rawDate}T23:59:59+08:00`)
+            : new Date(rawDate);
+        if (isNaN(parsed.getTime())) {
+          throw new Error('到期日時間格式無效');
+        }
+        const iso = parsed.toISOString();
+        if (iso !== existing.trialExpiresAt) {
+          changes.push(`到期日已調整`);
+          next.trialExpiresAt = iso;
+        }
+      }
+    }
+
+    if (rawUpdates.totalEarnings !== undefined) {
+      const earnings = Number(rawUpdates.totalEarnings);
+      if (!Number.isFinite(earnings) || earnings < 0 || earnings > 100_000_000) {
+        throw new Error('累計收益必須為 0 以上之有效數字');
+      }
+      if (earnings !== existing.totalEarnings) {
+        changes.push(`累計收益: ${existing.totalEarnings} → ${earnings}`);
+        next.totalEarnings = earnings;
+      }
+    }
+
+    if (rawUpdates.softwareTitle !== undefined) {
+      const swTitle = cleanStr(rawUpdates.softwareTitle, 60);
+      if (swTitle && swTitle !== existing.softwareTitle) {
+        changes.push(`軟體模組: ${swTitle}`);
+        next.softwareTitle = swTitle;
+      }
+    }
+
+    map.set(nodeId, next);
+
+    const auditEntry = this.recordHqAudit({
+      operatorId: operator.userId,
+      operatorName: operator.displayName,
+      action: 'UPDATE_NODE',
+      targetType: track === 'MONOLINE' ? 'MONOLINE_NODE' : 'BINARY_NODE',
+      targetId: nodeId,
+      summary: changes.length > 0 ? changes.join('；') : '儲存節點設定',
+    });
+
+    this.saveState();
+    return { node: next, auditEntry };
+  }
+
+  public hqDeleteNode(
+    track: 'MONOLINE' | 'BINARY',
+    rawNodeId: string,
+    operator: { userId: string; displayName: string }
+  ) {
+    const nodeId = String(rawNodeId || '').trim().toUpperCase();
+    if (track === 'BINARY') {
+      if (nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID) {
+        throw new Error('雙軌定海神針 C-25000001 受到保護，禁止刪除');
+      }
+      const existing = this.binaryNodes.get(nodeId);
+      if (!existing) throw new Error(`找不到雙軌節點 ${nodeId}`);
+      if (existing.leftChildId || existing.rightChildId) {
+        throw new Error(
+          `無法刪除 ${nodeId}：此節點下方仍有子節點（${[existing.leftChildId, existing.rightChildId].filter(Boolean).join(' / ')}），請先由最底層葉節點開始移除`
+        );
+      }
+      const parent = this.binaryNodes.get(existing.parentId);
+      if (parent) {
+        if (parent.leftChildId === nodeId) parent.leftChildId = undefined;
+        if (parent.rightChildId === nodeId) parent.rightChildId = undefined;
+      }
+      this.binaryNodes.delete(nodeId);
+      this.recomputeCounters();
+
+      const auditEntry = this.recordHqAudit({
+        operatorId: operator.userId,
+        operatorName: operator.displayName,
+        action: 'DELETE_NODE',
+        targetType: 'BINARY_NODE',
+        targetId: nodeId,
+        summary: `刪除雙軌葉節點 ${nodeId} (${existing.name})，並釋放父節點 ${existing.parentId} ${existing.placementPosition} 位置`,
+      });
+      this.saveState();
+      return {
+        deletedNodeId: nodeId,
+        track,
+        parentId: existing.parentId,
+        position: existing.placementPosition,
+        auditEntry,
+      };
+    }
+
+    const existing = this.monolineNodes.get(nodeId);
+    if (!existing) throw new Error(`找不到單軌節點 ${nodeId}`);
+    for (const other of this.monolineNodes.values()) {
+      if (other.parentId === nodeId) {
+        other.parentId = existing.parentId;
+      }
+    }
+    this.monolineNodes.delete(nodeId);
+    const sortedMono = Array.from(this.monolineNodes.values()).sort((a, b) => a.depth - b.depth);
+    sortedMono.forEach((n, idx) => {
+      n.depth = idx + 1;
+    });
+    this.recomputeCounters();
+
+    const auditEntry = this.recordHqAudit({
+      operatorId: operator.userId,
+      operatorName: operator.displayName,
+      action: 'DELETE_NODE',
+      targetType: 'MONOLINE_NODE',
+      targetId: nodeId,
+      summary: `刪除單軌節點 ${nodeId} (${existing.name}) 並重新串接公排順位`,
+    });
+    this.saveState();
+    return {
+      deletedNodeId: nodeId,
+      track,
+      parentId: existing.parentId,
+      auditEntry,
     };
   }
 }

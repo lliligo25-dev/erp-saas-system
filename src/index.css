@@ -28,10 +28,17 @@
 }
 
 /* Scoped Viewport Preview Modes (Desktop / Tablet / Laptop / Mobile / Fullscreen) */
-.ais-viewport-frame[data-viewport="mobile"],
 .ais-viewport-frame[data-viewport="tablet"],
 .ais-viewport-frame[data-viewport="laptop"] {
   transform: translateZ(0);
+}
+
+/* On desktop (>= 768px), confine fixed drawers/modals/toolbars cleanly inside the simulated phone screen;
+   on real mobile phones (< 768px), omit transform so native mobile scrolling & fixed positioning stay 100% native. */
+@media (min-width: 768px) {
+  .ais-viewport-frame[data-viewport="mobile"] {
+    transform: translateZ(0);
+  }
 }
 
 .ais-viewport-frame[data-viewport="mobile"] .ais-desktop-nav,
@@ -40,34 +47,133 @@
   display: none !important;
 }
 
-.ais-viewport-frame[data-viewport="mobile"] .ais-mobile-nav,
+.ais-viewport-frame[data-viewport="mobile"] .ais-mobile-drawer-btn,
 .ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-mobile-toggle,
 .ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-search-mobile {
   display: flex !important;
 }
 
-.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-sidebar:not(.ais-sidebar-open) {
-  display: none !important;
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-sidebar {
+  display: flex !important;
+  position: fixed !important;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  width: 272px !important;
+  max-width: 84%;
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-sidebar.ais-sidebar-open {
+  transform: translateX(0);
+  pointer-events: auto;
 }
 
 .ais-viewport-frame[data-viewport="mobile"] .ais-fivestar-sidebar-backdrop {
   display: block !important;
 }
 
-.ais-viewport-frame[data-viewport="mobile"] main {
-  padding: 12px !important;
+/* Smooth horizontal chip/tab scrollbars (touch momentum + crisp thin desktop bar) */
+.ais-h-scroll-track {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
 }
 
-.ais-viewport-frame[data-viewport="mobile"] .sm\:grid-cols-2,
-.ais-viewport-frame[data-viewport="mobile"] .md\:grid-cols-2,
-.ais-viewport-frame[data-viewport="mobile"] .md\:grid-cols-3,
-.ais-viewport-frame[data-viewport="mobile"] .lg\:grid-cols-3,
-.ais-viewport-frame[data-viewport="mobile"] .lg\:grid-cols-4,
-.ais-viewport-frame[data-viewport="mobile"] .lg\:grid-cols-6,
-.ais-viewport-frame[data-viewport="mobile"] .xl\:grid-cols-4 {
+.ais-h-scroll-track::-webkit-scrollbar {
+  height: 4px;
+}
+
+.ais-h-scroll-track::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+/* Emulate real smartphone (< 640px) responsive layout inside desktop mobile simulator */
+.ais-viewport-frame[data-viewport="mobile"] main.ais-app-main {
+  padding: 10px !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .px-4:is(.sm\:px-6, .lg\:px-8),
+.ais-viewport-frame[data-viewport="mobile"] .px-3:is(.sm\:px-6, .lg\:px-8) {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .p-4:is(.sm\:p-6, .sm\:p-8),
+.ais-viewport-frame[data-viewport="mobile"] .p-5:is(.sm\:p-6, .sm\:p-8) {
+  padding: 1rem !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .text-xl.sm\:text-2xl {
+  font-size: 1.25rem !important;
+  line-height: 1.75rem !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .text-2xl.sm\:text-3xl {
+  font-size: 1.375rem !important;
+  line-height: 1.8rem !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .text-lg.sm\:text-xl {
+  font-size: 1.125rem !important;
+  line-height: 1.5rem !important;
+}
+
+/* Hide desktop-only elements (base .hidden + responsive display) */
+.ais-viewport-frame[data-viewport="mobile"] .hidden:is(
+  .sm\:block, .sm\:inline, .sm\:inline-block, .sm\:flex, .sm\:inline-flex, .sm\:grid,
+  .md\:block, .md\:inline, .md\:inline-block, .md\:flex, .md\:inline-flex, .md\:grid,
+  .lg\:block, .lg\:inline, .lg\:inline-block, .lg\:flex, .lg\:inline-flex, .lg\:grid,
+  .xl\:block, .xl\:inline, .xl\:inline-block, .xl\:flex, .xl\:inline-flex, .xl\:grid
+) {
+  display: none !important;
+}
+
+/* Stack responsive horizontal flex rows vertically just like on a real phone */
+.ais-viewport-frame[data-viewport="mobile"] .flex-col:is(.sm\:flex-row, .md\:flex-row, .lg\:flex-row, .xl\:flex-row) {
+  flex-direction: column !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .flex-col:is(.sm\:items-center, .md\:items-center, .lg\:items-center):not(.items-center) {
+  align-items: stretch !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .w-full:is(.sm\:w-auto, .sm\:w-52, .sm\:w-64, .md\:w-72, .lg\:w-72) {
+  width: 100% !important;
+}
+
+/* Collapse all responsive multi-column grids to 1 column on mobile, then preserve base grid-cols-2 */
+.ais-viewport-frame[data-viewport="mobile"] :is(
+  .sm\:grid-cols-2, .sm\:grid-cols-3, .sm\:grid-cols-4, .sm\:grid-cols-5,
+  .md\:grid-cols-2, .md\:grid-cols-3, .md\:grid-cols-4, .md\:grid-cols-6, .md\:grid-cols-12,
+  .lg\:grid-cols-2, .lg\:grid-cols-3, .lg\:grid-cols-4, .lg\:grid-cols-6, .lg\:grid-cols-7, .lg\:grid-cols-12,
+  .xl\:grid-cols-2, .xl\:grid-cols-3, .xl\:grid-cols-4, .xl\:grid-cols-5
+) {
   grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
 }
 
+.ais-viewport-frame[data-viewport="mobile"] .grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+/* Reset responsive col-span classes so collapsed 1-col grids never spawn implicit overflow columns */
+.ais-viewport-frame[data-viewport="mobile"] :is(
+  .sm\:col-span-2, .sm\:col-span-3, .sm\:col-span-4, .sm\:col-span-6,
+  .md\:col-span-2, .md\:col-span-3, .md\:col-span-4, .md\:col-span-6, .md\:col-span-8,
+  .lg\:col-span-2, .lg\:col-span-3, .lg\:col-span-4, .lg\:col-span-5, .lg\:col-span-6, .lg\:col-span-7, .lg\:col-span-8
+) {
+  grid-column: auto !important;
+}
+
+.ais-viewport-frame[data-viewport="mobile"] .col-span-2 {
+  grid-column: span 2 / span 2 !important;
+}
+
+/* Tablet preview rules */
 .ais-viewport-frame[data-viewport="tablet"] .md\:grid-cols-3,
 .ais-viewport-frame[data-viewport="tablet"] .lg\:grid-cols-3,
 .ais-viewport-frame[data-viewport="tablet"] .lg\:grid-cols-4,
@@ -78,4 +184,5 @@
 .ais-viewport-frame[data-viewport="tablet"] .lg\:grid-cols-6 {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
+
 

@@ -5,6 +5,7 @@
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { erpEngine } from '../services/erpEngine';
+import { HorizontalScrollStrip } from './HorizontalScrollStrip';
 import {
   SYS_CONFIG,
   INDUSTRY_PACKS,
@@ -1678,21 +1679,37 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
       {/* ================= MAIN WRAPPER (Sidebar + Content) ================= */}
       <div className="flex flex-1 relative">
-        {mobileSidebarOpen && (
-          <div
-            onClick={() => setMobileSidebarOpen(false)}
-            className="ais-fivestar-sidebar-backdrop fixed inset-0 bg-black/40 z-30 md:hidden"
-          />
-        )}
-
-        {/* LEFT SIDEBAR (Collapsible 256px <-> 76px) */}
-        <aside
-          className={`ais-fivestar-sidebar bg-white border-r border-slate-200 flex flex-col shrink-0 transition-all duration-200 ${
+        <div
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-hidden={!mobileSidebarOpen}
+          className={`ais-fivestar-sidebar-backdrop fixed inset-0 bg-slate-950/50 backdrop-blur-[1px] z-30 md:hidden transition-opacity duration-200 ${
             mobileSidebarOpen
-              ? 'ais-sidebar-open fixed inset-y-0 left-0 z-40 w-[264px] shadow-2xl'
-              : 'hidden md:flex'
+              ? 'opacity-100 pointer-events-auto'
+              : 'opacity-0 pointer-events-none'
+          }`}
+        />
+
+        {/* LEFT SIDEBAR (Desktop Collapsible 258px <-> 76px · Mobile Slide-Out Drawer) */}
+        <aside
+          className={`ais-fivestar-sidebar bg-white border-r border-slate-200 flex flex-col shrink-0 transition-transform md:transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] fixed md:static inset-y-0 left-0 z-40 w-[272px] max-w-[84vw] shadow-2xl md:shadow-none ${
+            mobileSidebarOpen
+              ? 'ais-sidebar-open translate-x-0 pointer-events-auto'
+              : '-translate-x-full pointer-events-none md:translate-x-0 md:pointer-events-auto'
           } ${sidebarCollapsed ? 'md:w-[76px]' : 'md:w-[258px]'}`}
         >
+          {/* Mobile Drawer Top Bar with Close Button */}
+          <div className="ais-fivestar-mobile-toggle flex md:hidden items-center justify-between px-3.5 h-13 border-b border-slate-200 shrink-0">
+            <span className="text-sm font-bold text-slate-900">AI 軟體模組抽屜</span>
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(false)}
+              aria-label="收合模組抽屜"
+              className="min-w-[40px] min-h-[40px] rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
           {/* Sidebar Header: Home + Scoped Org Tree */}
           <div className="pt-2 px-2 shrink-0 space-y-1">
             <button
@@ -2135,15 +2152,20 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                 </div>
               )}
 
-              {/* Filter Chips Row 1: Category / Module Chips */}
-              <div className="px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 overflow-x-auto scrollbar-none">
-                <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+              {/* Filter Chips Row 1: Category / Module Chips (Horizontally Scrollable) */}
+              <div className="px-3 sm:px-6 py-2.5 flex items-center justify-between gap-3 min-w-0">
+                <HorizontalScrollStrip
+                  theme="light"
+                  ariaLabel="狀態與模組快篩"
+                  wrapperClassName="flex-1 min-w-0"
+                  className="gap-2 py-0.5"
+                >
                   {activeConf ? (
                     <>
                       <button
                         type="button"
                         onClick={() => setStatusFilter('ALL')}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                        className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                           statusFilter === 'ALL'
                             ? 'bg-[#0f172a] text-white'
                             : 'bg-slate-200/80 hover:bg-slate-300 text-slate-800'
@@ -2156,7 +2178,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                           key={cat}
                           type="button"
                           onClick={() => setStatusFilter(cat)}
-                          className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                          className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                             statusFilter === cat
                               ? 'bg-[#0f172a] text-white'
                               : 'bg-slate-200/80 hover:bg-slate-300 text-slate-800'
@@ -2173,7 +2195,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                           key={st}
                           type="button"
                           onClick={() => setStatusFilter(st)}
-                          className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                          className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                             statusFilter === st
                               ? 'bg-[#0f172a] text-white'
                               : 'bg-slate-200/80 hover:bg-slate-300 text-slate-800'
@@ -2188,7 +2210,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       <button
                         type="button"
                         onClick={() => handleSwitchSys('ALL')}
-                        className="px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-[#0f172a] text-white cursor-pointer"
+                        className="shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-[#0f172a] text-white cursor-pointer"
                       >
                         全部已開通 ({sysCounts.ALL || 0})
                       </button>
@@ -2202,7 +2224,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                           }
                           handleSwitchSys('TODO_BOARD');
                         }}
-                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 cursor-pointer border transition-colors ${
+                        className={`shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 cursor-pointer border transition-colors ${
                           overdueTodoCount > 0
                             ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300'
                             : 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-200'
@@ -2225,7 +2247,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                               <button
                                 type="button"
                                 onClick={() => handleSwitchSys(mKey)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-200/80 hover:bg-slate-300 text-slate-800 cursor-pointer"
+                                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-200/80 hover:bg-slate-300 text-slate-800 cursor-pointer"
                               >
                                 {SYS_CONFIG[mKey].name} ({sysCounts[mKey] || 0})
                               </button>
@@ -2234,7 +2256,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                               <button
                                 type="button"
                                 onClick={() => handleSwitchSys(tKey)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-200/80 hover:bg-slate-300 text-slate-800 cursor-pointer"
+                                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-200/80 hover:bg-slate-300 text-slate-800 cursor-pointer"
                               >
                                 {SYS_CONFIG[tKey].name} ({sysCounts[tKey] || 0})
                               </button>
@@ -2244,7 +2266,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       })}
                     </>
                   )}
-                </div>
+                </HorizontalScrollStrip>
 
                 <button
                   type="button"
@@ -2256,33 +2278,39 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                 </button>
               </div>
 
-              {/* Dynamic Date Filter Chips Row (when active module has date field) */}
+              {/* Dynamic Date Filter Chips Row (Horizontally Scrollable) */}
               {hasDateFieldInActive && (
-                <div className="px-4 sm:px-6 pb-2.5 flex items-center gap-2 overflow-x-auto scrollbar-none">
-                  <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-[#065fd4]" />
-                    <span>日期快篩：</span>
-                  </span>
-                  {[
-                    { id: 'ALL' as DateFilterMode, label: '全部日期' },
-                    { id: 'TODAY' as DateFilterMode, label: `今日 (${getOffsetDateStr(0).slice(5)})` },
-                    { id: 'TOMORROW' as DateFilterMode, label: `明天 (${getOffsetDateStr(1).slice(5)})` },
-                    { id: 'DAY_AFTER' as DateFilterMode, label: `後天 (${getOffsetDateStr(2).slice(5)})` },
-                    { id: 'WEEK' as DateFilterMode, label: '今起一週內' },
-                  ].map((df) => (
-                    <button
-                      key={df.id}
-                      type="button"
-                      onClick={() => setDateFilter(df.id)}
-                      className={`px-3 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
-                        dateFilter === df.id
-                          ? 'bg-[#065fd4] text-white border-[#065fd4]'
-                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                      }`}
-                    >
-                      {df.label}
-                    </button>
-                  ))}
+                <div className="px-3 sm:px-6 pb-2.5 min-w-0">
+                  <HorizontalScrollStrip
+                    theme="light"
+                    ariaLabel="日期快篩"
+                    className="gap-2 py-0.5"
+                  >
+                    <span className="shrink-0 text-[11px] font-bold text-slate-500 whitespace-nowrap flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-[#065fd4]" />
+                      <span>日期快篩：</span>
+                    </span>
+                    {[
+                      { id: 'ALL' as DateFilterMode, label: '全部日期' },
+                      { id: 'TODAY' as DateFilterMode, label: `今日 (${getOffsetDateStr(0).slice(5)})` },
+                      { id: 'TOMORROW' as DateFilterMode, label: `明天 (${getOffsetDateStr(1).slice(5)})` },
+                      { id: 'DAY_AFTER' as DateFilterMode, label: `後天 (${getOffsetDateStr(2).slice(5)})` },
+                      { id: 'WEEK' as DateFilterMode, label: '今起一週內' },
+                    ].map((df) => (
+                      <button
+                        key={df.id}
+                        type="button"
+                        onClick={() => setDateFilter(df.id)}
+                        className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap border transition-colors cursor-pointer ${
+                          dateFilter === df.id
+                            ? 'bg-[#065fd4] text-white border-[#065fd4]'
+                            : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        {df.label}
+                      </button>
+                    ))}
+                  </HorizontalScrollStrip>
                 </div>
               )}
             </div>

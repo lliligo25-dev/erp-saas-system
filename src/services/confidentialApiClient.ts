@@ -357,3 +357,148 @@ export async function apiDownloadHqProjectZip(): Promise<{
   }
 }
 
+export interface HqDbAuditEntry {
+  id: string;
+  timestamp: string;
+  operatorId: string;
+  operatorName: string;
+  action: 'UPDATE_MEMBER' | 'DELETE_MEMBER' | 'UPDATE_NODE' | 'DELETE_NODE';
+  targetType: 'MEMBER' | 'MONOLINE_NODE' | 'BINARY_NODE';
+  targetId: string;
+  summary: string;
+  gasSyncOk?: boolean;
+  gasSyncMessage?: string;
+}
+
+export interface HqDbOverviewData {
+  members: any[];
+  monolineNodes: any[];
+  binaryNodes: any[];
+  stores: Array<{ storeId: string; name: string }>;
+  centers: Array<{ centerId: string; name: string }>;
+  auditLogs: HqDbAuditEntry[];
+  gasBridge?: GasBridgeRemoteState;
+}
+
+export interface HqDbMutationResponse {
+  ok: boolean;
+  error?: string;
+  gasSync?: {
+    ok: boolean;
+    message: string;
+    needsGasUpgrade?: boolean;
+  };
+  overview?: HqDbOverviewData;
+  bootstrap?: ScopedBootstrapPayload;
+}
+
+export async function apiHqDbGetOverview(): Promise<{
+  ok: boolean;
+  data?: HqDbOverviewData;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/hq/db/overview', {
+      method: 'GET',
+      headers: buildAuthHeaders({ 'X-Requested-With': 'XMLHttpRequest' }),
+      credentials: 'include',
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json?.error || '無法讀取總部資料庫清單' };
+    }
+    return { ok: true, data: json as HqDbOverviewData };
+  } catch {
+    return { ok: false, error: '連線總部資料庫失敗，請稍後再試' };
+  }
+}
+
+export async function apiHqDbUpdateMember(
+  mid: string,
+  updates: Record<string, unknown>
+): Promise<HqDbMutationResponse> {
+  try {
+    const res = await fetch(`/api/hq/db/member/${encodeURIComponent(mid)}`, {
+      method: 'PATCH',
+      headers: buildAuthHeaders({
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      }),
+      credentials: 'include',
+      body: JSON.stringify(updates),
+    });
+    return (await res.json()) as HqDbMutationResponse;
+  } catch {
+    return { ok: false, error: '修改會員資料連線異常' };
+  }
+}
+
+export async function apiHqDbDeleteMember(
+  mid: string,
+  deleteLinkedNodes: boolean
+): Promise<HqDbMutationResponse> {
+  try {
+    const res = await fetch(
+      `/api/hq/db/member/${encodeURIComponent(mid)}?deleteLinkedNodes=${deleteLinkedNodes ? 'true' : 'false'}`,
+      {
+        method: 'DELETE',
+        headers: buildAuthHeaders({
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        }),
+        credentials: 'include',
+        body: JSON.stringify({ deleteLinkedNodes }),
+      }
+    );
+    return (await res.json()) as HqDbMutationResponse;
+  } catch {
+    return { ok: false, error: '刪除會員資料連線異常' };
+  }
+}
+
+export async function apiHqDbUpdateNode(
+  track: 'MONOLINE' | 'BINARY',
+  nodeId: string,
+  updates: Record<string, unknown>
+): Promise<HqDbMutationResponse> {
+  try {
+    const res = await fetch(
+      `/api/hq/db/node/${encodeURIComponent(track)}/${encodeURIComponent(nodeId)}`,
+      {
+        method: 'PATCH',
+        headers: buildAuthHeaders({
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        }),
+        credentials: 'include',
+        body: JSON.stringify(updates),
+      }
+    );
+    return (await res.json()) as HqDbMutationResponse;
+  } catch {
+    return { ok: false, error: '修改節點資料連線異常' };
+  }
+}
+
+export async function apiHqDbDeleteNode(
+  track: 'MONOLINE' | 'BINARY',
+  nodeId: string
+): Promise<HqDbMutationResponse> {
+  try {
+    const res = await fetch(
+      `/api/hq/db/node/${encodeURIComponent(track)}/${encodeURIComponent(nodeId)}`,
+      {
+        method: 'DELETE',
+        headers: buildAuthHeaders({
+          'X-Requested-With': 'XMLHttpRequest',
+        }),
+        credentials: 'include',
+      }
+    );
+    return (await res.json()) as HqDbMutationResponse;
+  } catch {
+    return { ok: false, error: '刪除節點資料連線異常' };
+  }
+}
+
+

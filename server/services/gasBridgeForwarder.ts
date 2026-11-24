@@ -336,3 +336,82 @@ export async function forwardErpEventToGas(
     saveState();
   }
 }
+
+export async function sendHqDbMutationToGas(
+  gasAction: 'hqUpdateMember' | 'hqDeleteMember' | 'hqUpdateNode' | 'hqDeleteNode',
+  data: Record<string, any>
+): Promise<{
+  ok: boolean;
+  message: string;
+  needsGasUpgrade?: boolean;
+}> {
+  if (!bridgeState.autoSyncEnabled || !bridgeState.gasWebAppUrl) {
+    return {
+      ok: false,
+      message: 'GAS 自動同步目前為關閉狀態（僅更新網站伺服器記憶體）',
+    };
+  }
+  const check = validateGasExecUrl(bridgeState.gasWebAppUrl);
+  if (!check.valid) {
+    return { ok: false, message: check.error || 'GAS 網址無效' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch(check.normalized, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: gasAction, data }),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    clearTimeout(timer);
+
+    let ok = false;
+    let message = '';
+    let needsGasUpgrade = false;
+
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.success === true) {
+        ok = true;
+        message = parsed.message || '已即時回寫同步至 Google 試算表';
+      } else {
+        const errStr = String(parsed?.error || 'GAS 回寫失敗');
+        needsGasUpgrade = /未知的 API 動作|Unknown action/i.test(errStr);
+        message = needsGasUpgrade
+          ? '網站已更新，但試算表 Code.gs 尚未支援遠端修改接口（請貼上最新版 Code.gs 並建立新版本部署，即可雙向同步）'
+          : errStr;
+      }
+    } catch {
+      needsGasUpgrade = /<!doctype|<html/i.test(text);
+      message = needsGasUpgrade
+        ? 'GAS 回傳 HTML，請確認 Code.gs 已更新並建立新版本部署'
+        : `GAS 回應格式異常 (HTTP ${res.status})`;
+    }
+
+    bridgeState.lastSyncStatus = {
+      ok,
+      action: gasAction,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    saveState();
+    return { ok, message, needsGasUpgrade };
+  } catch (err: any) {
+    clearTimeout(timer);
+    const message = `同步寫入 Google 試算表逾時或失敗：${err?.message || '網路異常'}`;
+    bridgeState.lastSyncStatus = {
+      ok: false,
+      action: gasAction,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    saveState();
+    return { ok: false, message };
+  }
+}
+

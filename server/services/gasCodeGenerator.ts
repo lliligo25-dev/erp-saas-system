@@ -88,6 +88,18 @@ function doPost(e) {
       case "exportHydrationState":
         result = exportHydrationState();
         break;
+      case "hqUpdateMember":
+        result = hqUpdateMemberInSheet(requestData.data);
+        break;
+      case "hqDeleteMember":
+        result = hqDeleteMemberInSheet(requestData.data);
+        break;
+      case "hqUpdateNode":
+        result = hqUpdateNodeInSheet(requestData.data);
+        break;
+      case "hqDeleteNode":
+        result = hqDeleteNodeInSheet(requestData.data);
+        break;
       case "upsertTodo":
         result = upsertMemberTodo(requestData.memberMid, requestData.data);
         break;
@@ -2671,6 +2683,244 @@ function restoreFromDriveBackupSnapshot(requestData) {
     restoredFileName: file.getName(),
     safetyRollbackBackupId: safetyBackup.backupId,
     message: "已完成點對點還原：" + file.getName() + "（還原前已自動保存安全快照 " + safetyBackup.backupId + "）"
+  };
+}
+
+/**
+ * ============================================================================
+ * 總部最高權限資料庫直接維護介面 (HQ Super Admin Writeback to Google Sheets)
+ * 完整相容既有 7欄/11欄精簡試算表列 與 標準 10欄/13欄試算表列，並強制手機/日期為純文字
+ * ============================================================================
+ */
+function hqToTaiwanDateStr_(raw) {
+  if (!raw) return "";
+  var s = String(raw).trim();
+  if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(s)) return s;
+  var d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return Utilities.formatDate(d, GLOBAL_CONFIG.TIMEZONE, GLOBAL_CONFIG.DATETIME_FORMAT);
+}
+
+function hqIsValidStatus_(v) {
+  var s = String(v || "").trim().toUpperCase();
+  return s === "HQ_LOCKED" || s === "TRIAL_ACTIVE" || s === "ACTIVE_RENEWED" || s === "EXPIRED_FROZEN";
+}
+
+function hqUpdateMemberInSheet(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MEMBERS);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { success: false, error: "找不到會員主檔工作表或無資料列" };
+  }
+  var targetMid = String((data && data.mid) || "").trim().toUpperCase();
+  if (!targetMid) return { success: false, error: "缺少會員編號 mid" };
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(12, sheet.getLastColumn());
+  var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var targetRowIdx = -1;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0] || "").trim().toUpperCase() === targetMid) {
+      targetRowIdx = i + 2;
+      break;
+    }
+  }
+  if (targetRowIdx < 0) {
+    return { success: false, error: "試算表「會員主檔」中找不到 " + targetMid };
+  }
+
+  var row = rows[targetRowIdx - 2];
+  var phoneText = data.phone !== undefined ? String(data.phone || "").trim() : String(row[2] || "").trim();
+  if (/^9\\d{8}$/.test(phoneText)) phoneText = "0" + phoneText;
+  var idText = data.idNumberMasked !== undefined ? String(data.idNumberMasked || "").trim().toUpperCase() : String(row[3] || "");
+  var expTw = data.trialExpiresAt !== undefined ? hqToTaiwanDateStr_(data.trialExpiresAt) : String(row[8] || "");
+
+  // 強制純文字格式避免開頭 0 與日期格式跑掉
+  sheet.getRange(targetRowIdx, 3).setNumberFormat("@");
+  sheet.getRange(targetRowIdx, 4).setNumberFormat("@");
+  sheet.getRange(targetRowIdx, 9).setNumberFormat("@");
+
+  if (data.name !== undefined) sheet.getRange(targetRowIdx, 2).setValue(String(data.name || "").trim());
+  sheet.getRange(targetRowIdx, 3).setValue(phoneText);
+  sheet.getRange(targetRowIdx, 4).setValue(idText);
+  if (data.sponsorMid !== undefined) sheet.getRange(targetRowIdx, 5).setValue(String(data.sponsorMid || "").trim().toUpperCase());
+  if (data.storeId !== undefined) sheet.getRange(targetRowIdx, 6).setValue(String(data.storeId || "").trim());
+  if (data.centerId !== undefined) sheet.getRange(targetRowIdx, 7).setValue(String(data.centerId || "").trim());
+  if (expTw) sheet.getRange(targetRowIdx, 9).setValue(expTw);
+  if (data.accumulatedRentAmount !== undefined) sheet.getRange(targetRowIdx, 10).setValue(Number(data.accumulatedRentAmount || 0));
+
+  SpreadsheetApp.flush();
+  invalidateHotCacheKeys(["SYS_STATS"]);
+  return {
+    success: true,
+    message: "已同步更新試算表「會員主檔」第 " + targetRowIdx + " 列 (" + targetMid + ")"
+  };
+}
+
+function hqDeleteMemberInSheet(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var targetMid = String((data && data.mid) || "").trim().toUpperCase();
+  if (!targetMid || targetMid === GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID) {
+    return { success: false, error: "禁止刪除系統核心錨點或無效編號" };
+  }
+
+  var sheetMembers = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MEMBERS);
+  var deletedMemberRow = false;
+  if (sheetMembers && sheetMembers.getLastRow() >= 2) {
+    var mVals = sheetMembers.getRange(2, 1, sheetMembers.getLastRow() - 1, 1).getValues();
+    for (var i = mVals.length - 1; i >= 0; i--) {
+      if (String(mVals[i][0] || "").trim().toUpperCase() === targetMid) {
+        sheetMembers.deleteRow(i + 2);
+        deletedMemberRow = true;
+      }
+    }
+  }
+
+  if (data && data.deleteLinkedNodes) {
+    var monoIds = Array.isArray(data.deletedMonolineIds) ? data.deletedMonolineIds : [];
+    for (var m = 0; m < monoIds.length; m++) {
+      hqDeleteNodeInSheet({ track: "MONOLINE", nodeId: monoIds[m] });
+    }
+    var biIds = Array.isArray(data.deletedBinaryIds) ? data.deletedBinaryIds : [];
+    for (var b = 0; b < biIds.length; b++) {
+      hqDeleteNodeInSheet({ track: "BINARY", nodeId: biIds[b] });
+    }
+  }
+
+  SpreadsheetApp.flush();
+  invalidateHotCacheKeys(["SYS_STATS"]);
+  return {
+    success: true,
+    message: deletedMemberRow
+      ? "已從試算表「會員主檔」移除 " + targetMid
+      : "試算表「會員主檔」中無 " + targetMid + "（網站端已同步移除）"
+  };
+}
+
+function hqUpdateNodeInSheet(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var track = String((data && data.track) || "").trim().toUpperCase();
+  var nodeId = String((data && data.nodeId) || "").trim().toUpperCase();
+  if (!nodeId) return { success: false, error: "缺少節點編號 nodeId" };
+
+  var sheetName = track === "MONOLINE" ? GLOBAL_CONFIG.SHEET_MONOLINE : GLOBAL_CONFIG.SHEET_BINARY;
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { success: false, error: "找不到工作表「" + sheetName + "」或無資料" };
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(track === "MONOLINE" ? 10 : 13, sheet.getLastColumn());
+  var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var targetRowIdx = -1;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0] || "").trim().toUpperCase() === nodeId) {
+      targetRowIdx = i + 2;
+      break;
+    }
+  }
+  if (targetRowIdx < 0) {
+    return { success: false, error: "試算表「" + sheetName + "」中找不到節點 " + nodeId };
+  }
+
+  var row = rows[targetRowIdx - 2];
+  var expTw = data.trialExpiresAt !== undefined ? hqToTaiwanDateStr_(data.trialExpiresAt) : "";
+
+  if (track === "MONOLINE") {
+    var isCompact7 = hqIsValidStatus_(row[3]) || (/^\\d+$/.test(String(row[2] || "").trim()) && !(Number(row[4]) > 0));
+    if (isCompact7) {
+      // 精簡 7 欄：D欄(4)=狀態、E欄(5)=到期日、G欄(7)=累計收益
+      if (data.status !== undefined) sheet.getRange(targetRowIdx, 4).setValue(String(data.status).trim().toUpperCase());
+      if (expTw) {
+        sheet.getRange(targetRowIdx, 5).setNumberFormat("@").setValue(expTw);
+      }
+      if (data.totalEarnings !== undefined) sheet.getRange(targetRowIdx, 7).setValue(Number(data.totalEarnings || 0));
+    } else {
+      // 標準 10 欄：C(3)=名稱、F(6)=推薦人、G(7)=狀態、H(8)=鎖定、I(9)=到期日、J(10)=累計收益
+      if (data.name !== undefined) sheet.getRange(targetRowIdx, 3).setValue(String(data.name).trim());
+      if (data.sponsorMid !== undefined) sheet.getRange(targetRowIdx, 6).setValue(String(data.sponsorMid).trim().toUpperCase());
+      if (data.status !== undefined) sheet.getRange(targetRowIdx, 7).setValue(String(data.status).trim().toUpperCase());
+      if (data.hqPermanentLocked !== undefined) sheet.getRange(targetRowIdx, 8).setValue(Boolean(data.hqPermanentLocked));
+      if (expTw) {
+        sheet.getRange(targetRowIdx, 9).setNumberFormat("@").setValue(expTw);
+      }
+      if (data.totalEarnings !== undefined) sheet.getRange(targetRowIdx, 10).setValue(Number(data.totalEarnings || 0));
+    }
+  } else {
+    var isCompact11 = hqIsValidStatus_(row[8]) && !hqIsValidStatus_(row[9]);
+    if (isCompact11) {
+      // 精簡 11 欄：C(3)=推薦人、I(9)=狀態、J(10)=到期日、K(11)=累計收益
+      if (data.sponsorMid !== undefined) sheet.getRange(targetRowIdx, 3).setValue(String(data.sponsorMid).trim().toUpperCase());
+      if (data.status !== undefined) sheet.getRange(targetRowIdx, 9).setValue(String(data.status).trim().toUpperCase());
+      if (expTw) {
+        sheet.getRange(targetRowIdx, 10).setNumberFormat("@").setValue(expTw);
+      }
+      if (data.totalEarnings !== undefined) sheet.getRange(targetRowIdx, 11).setValue(Number(data.totalEarnings || 0));
+    } else {
+      // 標準 13 欄：C(3)=名稱、I(9)=推薦人、J(10)=狀態、K(11)=鎖定、L(12)=到期日、M(13)=累計收益
+      if (data.name !== undefined) sheet.getRange(targetRowIdx, 3).setValue(String(data.name).trim());
+      if (data.sponsorMid !== undefined) sheet.getRange(targetRowIdx, 9).setValue(String(data.sponsorMid).trim().toUpperCase());
+      if (data.status !== undefined) sheet.getRange(targetRowIdx, 10).setValue(String(data.status).trim().toUpperCase());
+      if (data.hqPermanentLocked !== undefined) sheet.getRange(targetRowIdx, 11).setValue(Boolean(data.hqPermanentLocked));
+      if (expTw) {
+        sheet.getRange(targetRowIdx, 12).setNumberFormat("@").setValue(expTw);
+      }
+      if (data.totalEarnings !== undefined) sheet.getRange(targetRowIdx, 13).setValue(Number(data.totalEarnings || 0));
+    }
+  }
+
+  SpreadsheetApp.flush();
+  invalidateHotCacheKeys(["SYS_STATS", "SUBTREE:" + GLOBAL_CONFIG.BINARY_ROOT_NODE_ID + ":3"]);
+  return {
+    success: true,
+    message: "已同步更新試算表「" + sheetName + "」節點 " + nodeId
+  };
+}
+
+function hqDeleteNodeInSheet(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var track = String((data && data.track) || "").trim().toUpperCase();
+  var nodeId = String((data && data.nodeId) || "").trim().toUpperCase();
+  if (!nodeId || nodeId === GLOBAL_CONFIG.BINARY_ROOT_NODE_ID) {
+    return { success: false, error: "禁止刪除系統根節點或無效編號" };
+  }
+
+  var sheetName = track === "MONOLINE" ? GLOBAL_CONFIG.SHEET_MONOLINE : GLOBAL_CONFIG.SHEET_BINARY;
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { success: false, error: "找不到工作表「" + sheetName + "」" };
+  }
+
+  var lastRow = sheet.getLastRow();
+  var rows = sheet.getRange(2, 1, lastRow - 1, Math.max(8, sheet.getLastColumn())).getValues();
+  var deleted = false;
+
+  if (track === "BINARY") {
+    // 先清掉父節點對本節點的左右子指標 (G欄=7 / H欄=8)
+    for (var p = 0; p < rows.length; p++) {
+      if (String(rows[p][6] || "").trim().toUpperCase() === nodeId) {
+        sheet.getRange(p + 2, 7).setValue("");
+      }
+      if (String(rows[p][7] || "").trim().toUpperCase() === nodeId) {
+        sheet.getRange(p + 2, 8).setValue("");
+      }
+    }
+  }
+
+  for (var i = rows.length - 1; i >= 0; i--) {
+    if (String(rows[i][0] || "").trim().toUpperCase() === nodeId) {
+      sheet.deleteRow(i + 2);
+      deleted = true;
+    }
+  }
+
+  SpreadsheetApp.flush();
+  invalidateHotCacheKeys(["SYS_STATS", "SUBTREE:" + GLOBAL_CONFIG.BINARY_ROOT_NODE_ID + ":3"]);
+  return {
+    success: true,
+    message: deleted
+      ? "已從試算表「" + sheetName + "」安全移除節點 " + nodeId
+      : "試算表「" + sheetName + "」中無節點 " + nodeId
   };
 }
 `;

@@ -59,11 +59,16 @@ export const ViewportToolbar: React.FC<ViewportToolbarProps> = ({
 }) => {
   const activeMeta = VIEWPORT_OPTIONS.find((o) => o.id === mode) || VIEWPORT_OPTIONS[0];
 
+  // 手機面板時隱藏最上方功能設定列，全部收納於左側三條線抽屜選單
+  if (mode === 'mobile') {
+    return null;
+  }
+
   return (
     <div
       role="region"
       aria-label="顯示裝置、全螢幕、字體與分享部署切換列"
-      className="bg-slate-950 border-b border-slate-800/90 px-3 sm:px-6 py-1.5 z-50"
+      className="hidden md:block bg-slate-950 border-b border-slate-800/90 px-3 sm:px-6 py-1.5 z-50"
     >
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
         {/* Left: Active mode badge + Font Dropdowns */}

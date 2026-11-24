@@ -27,6 +27,7 @@ import {
   forwardErpEventToGas,
   getGasBridgeState,
   pingGasBridge,
+  sendHqDbMutationToGas,
   setGasHydrationStatus,
   updateGasBridgeConfig,
   type GasHydrationStatus,
@@ -137,6 +138,26 @@ function requireHqRole(req: AuthedRequest, res: Response, next: NextFunction) {
     return;
   }
   req.erpSession = session;
+  next();
+}
+
+function verifyHqMutationOrigin(req: Request, res: Response, next: NextFunction) {
+  // Accept explicit custom header or same-origin Origin header to block cross-site cookie mutations
+  const hasCustomHeader = req.headers['x-requested-with'] === 'XMLHttpRequest' || Boolean(req.headers.authorization);
+  const origin = req.headers.origin;
+  const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim();
+  let originMatchesHost = false;
+  if (typeof origin === 'string' && origin && host) {
+    try {
+      originMatchesHost = new URL(origin).host === host;
+    } catch {
+      originMatchesHost = false;
+    }
+  }
+  if (!hasCustomHeader && !originMatchesHost) {
+    res.status(403).json({ ok: false, error: '來源驗證失敗，已拒絕未經授權的跨站寫入請求' });
+    return;
+  }
   next();
 }
 
@@ -472,6 +493,161 @@ async function startServer() {
       hydrationResult,
       bootstrap,
     });
+  });
+
+  // 4c. HQ Super Admin Database Direct Editor Routes (Strict HQ RBAC + Origin Guard + Audit Trail + GAS Writeback)
+  app.get('/api/hq/db/overview', requireHqRole, (_req, res) => {
+    const overview = serverErpEngine.getHqDbOverview();
+    res.json({
+      ok: true,
+      ...overview,
+      gasBridge: getGasBridgeState(),
+    });
+  });
+
+  app.patch('/api/hq/db/member/:mid', requireHqRole, verifyHqMutationOrigin, async (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const targetMid = String(req.params.mid || '').trim().toUpperCase();
+    try {
+      const { member, auditEntry } = serverErpEngine.hqUpdateMember(
+        targetMid,
+        (req.body || {}) as Record<string, unknown>,
+        { userId: session.userId, displayName: session.displayName }
+      );
+      const gasSync = await sendHqDbMutationToGas('hqUpdateMember', {
+        mid: member.mid,
+        name: member.name,
+        phone: member.phone,
+        idNumberMasked: member.idNumberMasked,
+        sponsorMid: member.sponsorMid,
+        storeId: member.storeId,
+        centerId: member.centerId,
+        trialExpiresAt: member.trialExpiresAt,
+        accumulatedRentAmount: member.accumulatedRentAmount,
+        tel: member.tel,
+        line: member.line,
+        email: member.email,
+        address: member.address,
+      });
+      serverErpEngine.updateAuditLogGasSync(auditEntry.id, gasSync.ok, gasSync.message);
+      const overview = serverErpEngine.getHqDbOverview();
+      const bootstrap = serverErpEngine.getScopedBootstrap(session);
+      res.json({
+        ok: true,
+        member,
+        gasSync,
+        overview,
+        bootstrap,
+      });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || '修改會員資料失敗' });
+    }
+  });
+
+  app.delete('/api/hq/db/member/:mid', requireHqRole, verifyHqMutationOrigin, async (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const targetMid = String(req.params.mid || '').trim().toUpperCase();
+    const deleteLinkedNodes =
+      req.query.deleteLinkedNodes === 'true' || Boolean((req.body || {}).deleteLinkedNodes);
+    try {
+      const deleted = serverErpEngine.hqDeleteMember(
+        targetMid,
+        { deleteLinkedNodes },
+        { userId: session.userId, displayName: session.displayName }
+      );
+      const gasSync = await sendHqDbMutationToGas('hqDeleteMember', {
+        mid: deleted.deletedMid,
+        deleteLinkedNodes,
+        deletedMonolineIds: deleted.deletedMonolineIds,
+        deletedBinaryIds: deleted.deletedBinaryIds,
+      });
+      serverErpEngine.updateAuditLogGasSync(deleted.auditEntry.id, gasSync.ok, gasSync.message);
+      const overview = serverErpEngine.getHqDbOverview();
+      const bootstrap = serverErpEngine.getScopedBootstrap(session);
+      res.json({
+        ok: true,
+        deleted,
+        gasSync,
+        overview,
+        bootstrap,
+      });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || '刪除會員資料失敗' });
+    }
+  });
+
+  app.patch('/api/hq/db/node/:track/:nodeId', requireHqRole, verifyHqMutationOrigin, async (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const rawTrack = String(req.params.track || '').trim().toUpperCase();
+    if (rawTrack !== 'MONOLINE' && rawTrack !== 'BINARY') {
+      res.status(400).json({ ok: false, error: '無效的軌道類型（僅支援 MONOLINE 或 BINARY）' });
+      return;
+    }
+    const targetNodeId = String(req.params.nodeId || '').trim().toUpperCase();
+    try {
+      const { node, auditEntry } = serverErpEngine.hqUpdateNode(
+        rawTrack,
+        targetNodeId,
+        (req.body || {}) as Record<string, unknown>,
+        { userId: session.userId, displayName: session.displayName }
+      );
+      const gasSync = await sendHqDbMutationToGas('hqUpdateNode', {
+        track: rawTrack,
+        nodeId: node.nodeId,
+        name: node.name,
+        status: node.status,
+        sponsorMid: node.sponsorMid,
+        trialExpiresAt: node.trialExpiresAt,
+        totalEarnings: node.totalEarnings,
+        hqPermanentLocked: node.hqPermanentLocked,
+      });
+      serverErpEngine.updateAuditLogGasSync(auditEntry.id, gasSync.ok, gasSync.message);
+      const overview = serverErpEngine.getHqDbOverview();
+      const bootstrap = serverErpEngine.getScopedBootstrap(session);
+      res.json({
+        ok: true,
+        node,
+        gasSync,
+        overview,
+        bootstrap,
+      });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || '修改節點資料失敗' });
+    }
+  });
+
+  app.delete('/api/hq/db/node/:track/:nodeId', requireHqRole, verifyHqMutationOrigin, async (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const rawTrack = String(req.params.track || '').trim().toUpperCase();
+    if (rawTrack !== 'MONOLINE' && rawTrack !== 'BINARY') {
+      res.status(400).json({ ok: false, error: '無效的軌道類型（僅支援 MONOLINE 或 BINARY）' });
+      return;
+    }
+    const targetNodeId = String(req.params.nodeId || '').trim().toUpperCase();
+    try {
+      const deleted = serverErpEngine.hqDeleteNode(
+        rawTrack,
+        targetNodeId,
+        { userId: session.userId, displayName: session.displayName }
+      );
+      const gasSync = await sendHqDbMutationToGas('hqDeleteNode', {
+        track: rawTrack,
+        nodeId: deleted.deletedNodeId,
+        parentId: deleted.parentId,
+      });
+      serverErpEngine.updateAuditLogGasSync(deleted.auditEntry.id, gasSync.ok, gasSync.message);
+      const overview = serverErpEngine.getHqDbOverview();
+      const bootstrap = serverErpEngine.getScopedBootstrap(session);
+      res.json({
+        ok: true,
+        deleted,
+        gasSync,
+        overview,
+        bootstrap,
+      });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || '刪除節點資料失敗' });
+    }
   });
 
   // 5. Server-Authoritative ERP Action Sync (Strict RBAC enforced)

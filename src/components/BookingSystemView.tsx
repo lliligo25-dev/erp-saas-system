@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { erpEngine } from '../services/erpEngine';
+import { HorizontalScrollStrip } from './HorizontalScrollStrip';
 import { notifyNodesUpdated } from '../services/softwareNodeSync';
 import {
   CLOUD_VAULT_UPDATED_EVENT,
@@ -591,11 +592,15 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
             </div>
           )}
 
-          {/* Sub-navigation Tabs */}
-          <div className="flex items-center gap-1 border-b border-slate-800 overflow-x-auto text-xs font-medium">
+          {/* Sub-navigation Tabs (Horizontally Scrollable) */}
+          <HorizontalScrollStrip
+            theme="dark"
+            ariaLabel="AI 個人預約功能分頁"
+            className="gap-1 border-b border-slate-800 text-xs font-medium"
+          >
             <button
               onClick={() => setSubTab('appointments')}
-              className={`py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              className={`shrink-0 py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'appointments'
                   ? 'border-sky-500 text-sky-400 font-semibold'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -616,7 +621,7 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
                 }
                 setSubTab('public_preview');
               }}
-              className={`py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              className={`shrink-0 py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'public_preview'
                   ? 'border-sky-500 text-sky-400 font-semibold'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -632,7 +637,7 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
                 setEditBio(profile.bio);
                 setSubTab('settings');
               }}
-              className={`py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              className={`shrink-0 py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'settings'
                   ? 'border-sky-500 text-sky-400 font-semibold'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -644,7 +649,7 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
 
             <button
               onClick={() => setSubTab('billing')}
-              className={`py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              className={`shrink-0 py-2.5 px-4 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'billing'
                   ? 'border-sky-500 text-sky-400 font-semibold'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -653,7 +658,7 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
               <RefreshCw className="w-3.5 h-3.5" />
               <span>3 大 AI 軟體計費與 100 元閉環分潤</span>
             </button>
-          </div>
+          </HorizontalScrollStrip>
 
           {/* Inline Feedback Message */}
           {inlineMsg && (

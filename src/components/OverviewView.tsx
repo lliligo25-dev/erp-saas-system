@@ -39,7 +39,8 @@ import {
   Check,
   ExternalLink,
   Smartphone,
-  QrCode
+  QrCode,
+  Database
 } from 'lucide-react';
 import {
   HqQrCodeStudioModal,
@@ -145,6 +146,18 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <span className="text-slate-500">雙軌錨點：</span>
               <span className="font-mono text-indigo-300 ml-1">{GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID} (定海神針)</span>
             </div>
+          </div>
+
+          <div className="pt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onNavigate('hq_db_admin')}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>總部資料庫維護（修改 / 刪除）</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>

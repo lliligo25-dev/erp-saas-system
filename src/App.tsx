@@ -42,7 +42,9 @@ import {
   detectMobileUserAgent,
 } from './services/rolePortalUrlService';
 import { LineInAppBanner } from './components/LineInAppBanner';
-import { Search, RotateCcw, ShieldCheck } from 'lucide-react';
+import { MobileSettingsDrawer } from './components/MobileSettingsDrawer';
+import { MobileDeviceShell, MobilePhonePreset } from './components/MobileDeviceShell';
+import { Search, RotateCcw, ShieldCheck, Menu } from 'lucide-react';
 
 // 方案 B 保密原則：總部機密儀表板、閉環清算器、全網樹圖與 GAS/MySQL 程式碼僅動態延遲載入，
 // 一般會員、營業店、教育中心與未登入訪客的瀏覽器永遠不會下載到總部模組程式碼。
@@ -64,8 +66,12 @@ const GasCodeAndApiView = lazy(() =>
 const MemberLookupModal = lazy(() =>
   import('./components/MemberLookupModal').then((m) => ({ default: m.MemberLookupModal }))
 );
+const HqDatabaseAdminView = lazy(() =>
+  import('./components/HqDatabaseAdminView').then((m) => ({ default: m.HqDatabaseAdminView }))
+);
 
 const VIEWPORT_MODE_STORAGE_KEY = 'ais_viewport_mode';
+const MOBILE_PRESET_STORAGE_KEY = 'ais_mobile_phone_preset';
 
 const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   HQ_STAFF: [
@@ -86,9 +92,9 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
       matchTabs: ['store_portal', 'center_portal'],
     },
     {
-      id: 'crm_events',
-      label: '通訊與 GAS',
-      matchTabs: ['gas_api'],
+      id: 'hq_db_admin',
+      label: '資料庫與 GAS',
+      matchTabs: ['crm_events', 'gas_api'],
     },
   ],
   MEMBER: [
@@ -175,6 +181,18 @@ export default function App() {
     return 'desktop';
   });
   const [isNativeFullscreen, setIsNativeFullscreen] = useState<boolean>(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
+  const [mobilePreset, setMobilePreset] = useState<MobilePhonePreset>(() => {
+    try {
+      const saved = localStorage.getItem(MOBILE_PRESET_STORAGE_KEY) as MobilePhonePreset | null;
+      if (saved === 'compact' || saved === 'standard' || saved === 'large') {
+        return saved;
+      }
+    } catch {
+      // ignore storage error
+    }
+    return isDedicatedMobileUrl ? 'large' : 'standard';
+  });
   const [shareDeployModal, setShareDeployModal] = useState<{
     open: boolean;
     tab: ShareDeployModalTab;
@@ -292,6 +310,14 @@ export default function App() {
   }, [viewportMode]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(MOBILE_PRESET_STORAGE_KEY, mobilePreset);
+    } catch {
+      // ignore storage error
+    }
+  }, [mobilePreset]);
+
+  useEffect(() => {
     const onFsChange = () => {
       const fsActive = Boolean(document.fullscreenElement);
       setIsNativeFullscreen(fsActive);
@@ -383,6 +409,7 @@ export default function App() {
     erpEngine.clearProjection();
     setSession(null);
     setIsLookupModalOpen(false);
+    setMobileDrawerOpen(false);
   };
 
   const handleResetSystem = () => {
@@ -424,6 +451,70 @@ export default function App() {
 
   // Show Public Unauthenticated Join Form or Role Login Gateway if unauthenticated
   if (!session) {
+    const isMobilePreview = viewportMode === 'mobile';
+    const guestScrollContent = (
+      <>
+        {/* Mobile Compact Top Bar with Left Three-Line Settings Drawer Trigger */}
+        <div
+          className={`${
+            isMobilePreview ? 'flex' : 'flex md:hidden'
+          } sticky top-0 z-40 h-13 px-3 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 items-center justify-between gap-2 shrink-0`}
+        >
+          <button
+            type="button"
+            onClick={() => setMobileDrawerOpen((v) => !v)}
+            aria-label={mobileDrawerOpen ? '關閉功能設定抽屜' : '開啟功能設定抽屜'}
+            aria-expanded={mobileDrawerOpen}
+            className="min-w-[44px] min-h-[44px] -ml-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-100 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <span className="text-sm font-bold text-slate-100 truncate">
+            {showPublicJoin ? '新會員自助開通' : '企業智能雲端入口'}
+          </span>
+          <div className="w-10 shrink-0" aria-hidden="true" />
+        </div>
+
+        <LineInAppBanner />
+        {showPublicJoin ? (
+          <PublicJoinFormView
+            initialSponsorMid={publicJoinSponsorMid}
+            onGoToLogin={(prefillMid) => {
+              if (prefillMid) {
+                setLockedIdentifier(prefillMid);
+              }
+              setShowPublicJoin(false);
+            }}
+          />
+        ) : (
+          <RoleLoginPortal
+            onLoginSuccess={handleLoginSuccess}
+            lockedRole={lockedPortalRole}
+            initialIdentifier={lockedIdentifier}
+            onOpenPublicJoin={
+              lockedPortalRole === 'HQ_STAFF' ? undefined : () => setShowPublicJoin(true)
+            }
+          />
+        )}
+      </>
+    );
+
+    const guestDrawerOverlay = (
+      <MobileSettingsDrawer
+        isOpen={mobileDrawerOpen}
+        onClose={() => setMobileDrawerOpen(false)}
+        session={null}
+        lockedPortalRole={lockedPortalRole}
+        viewportMode={viewportMode}
+        isNativeFullscreen={isNativeFullscreen}
+        onSelectViewportMode={handleSelectViewportMode}
+        fontPrefs={fontPrefs}
+        onChangeFontPrefs={handleChangeFontPrefs}
+        onOpenShareModal={() => setShareDeployModal({ open: true, tab: 'share' })}
+        onOpenDeployModal={() => setShareDeployModal({ open: true, tab: 'deploy' })}
+      />
+    );
+
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
         <ViewportToolbar
@@ -435,31 +526,22 @@ export default function App() {
           onOpenShareModal={() => setShareDeployModal({ open: true, tab: 'share' })}
           onOpenDeployModal={() => setShareDeployModal({ open: true, tab: 'deploy' })}
         />
-        <div className="flex-1 bg-slate-950 overflow-x-auto">
-          <div data-viewport={viewportMode} className={getViewportWrapperClass()}>
-            <LineInAppBanner />
-            {showPublicJoin ? (
-              <PublicJoinFormView
-                initialSponsorMid={publicJoinSponsorMid}
-                onGoToLogin={(prefillMid) => {
-                  if (prefillMid) {
-                    setLockedIdentifier(prefillMid);
-                  }
-                  setShowPublicJoin(false);
-                }}
-              />
-            ) : (
-              <RoleLoginPortal
-                onLoginSuccess={handleLoginSuccess}
-                lockedRole={lockedPortalRole}
-                initialIdentifier={lockedIdentifier}
-                onOpenPublicJoin={
-                  lockedPortalRole === 'HQ_STAFF' ? undefined : () => setShowPublicJoin(true)
-                }
-              />
-            )}
+        {isMobilePreview ? (
+          <MobileDeviceShell
+            preset={mobilePreset}
+            onChangePreset={setMobilePreset}
+            onExitMobileMode={() => handleSelectViewportMode('desktop')}
+            scrollContent={guestScrollContent}
+            overlayContent={guestDrawerOverlay}
+          />
+        ) : (
+          <div className="flex-1 bg-slate-950 overflow-x-auto">
+            <div data-viewport={viewportMode} className={getViewportWrapperClass()}>
+              {guestScrollContent}
+              {guestDrawerOverlay}
+            </div>
           </div>
-        </div>
+        )}
         <PublicShareDeployModal
           isOpen={shareDeployModal.open}
           initialTab={shareDeployModal.tab}
@@ -474,9 +556,9 @@ export default function App() {
 
   const navItems = NAV_BY_ROLE[session.role];
 
-  // Helper: HQ Staff compact sub-navigation strip for grouped menus
+  // Helper: HQ Staff compact sub-navigation strip for grouped menus (desktop/tablet only; mobile uses left drawer)
   const renderHqSubNav = () => {
-    if (session.role !== 'HQ_STAFF') return null;
+    if (session.role !== 'HQ_STAFF' || viewportMode === 'mobile') return null;
 
     if (
       ['registration', 'booking_system', 'software_order', 'member_portal', 'member_nodes'].includes(
@@ -491,7 +573,7 @@ export default function App() {
         { id: 'member_nodes', label: '全網結點查詢' },
       ];
       return (
-        <div className="mb-6 flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
+        <div className="mb-6 hidden md:flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
           {subTabs.map((st) => (
             <button
               key={st.id}
@@ -512,7 +594,7 @@ export default function App() {
     if (['tree_explorer', 'binary_tree', 'monoline'].includes(currentTab)) {
       const activeTree = currentTab === 'monoline' ? 'monoline' : 'tree_explorer';
       return (
-        <div className="mb-6 flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
+        <div className="mb-6 hidden md:flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
           <button
             onClick={() => setCurrentTab('tree_explorer')}
             className={`px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer whitespace-nowrap ${
@@ -544,7 +626,7 @@ export default function App() {
         { id: 'center_portal', label: '教育中心管理與 6 代培訓' },
       ];
       return (
-        <div className="mb-6 flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
+        <div className="mb-6 hidden md:flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
           {subTabs.map((st) => (
             <button
               key={st.id}
@@ -562,13 +644,14 @@ export default function App() {
       );
     }
 
-    if (['crm_events', 'gas_api'].includes(currentTab)) {
+    if (['hq_db_admin', 'crm_events', 'gas_api'].includes(currentTab)) {
       const subTabs = [
+        { id: 'hq_db_admin', label: '總部資料庫維護 (最高權限)' },
         { id: 'crm_events', label: '通訊錄與活動 (CM/CT/EM/ET)' },
         { id: 'gas_api', label: 'GAS 後端 / MySQL 擴容 & API' },
       ];
       return (
-        <div className="mb-6 flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
+        <div className="mb-6 hidden md:flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-lg w-fit text-xs">
           {subTabs.map((st) => (
             <button
               key={st.id}
@@ -589,39 +672,70 @@ export default function App() {
     return null;
   };
 
-  const isFullBleed = viewportMode === 'fullscreen';
+  const getActiveHqSubNavItems = (): Array<{ id: string; label: string }> => {
+    if (session.role !== 'HQ_STAFF') return [];
+    if (
+      ['registration', 'booking_system', 'software_order', 'member_portal', 'member_nodes'].includes(
+        currentTab
+      )
+    ) {
+      return [
+        { id: 'registration', label: '1+1 雙發註冊' },
+        { id: 'software_order', label: 'AI 雙軌軟體訂購系統' },
+        { id: 'booking_system', label: '第 3 種 AI 個人預約管理' },
+        { id: 'member_portal', label: '會員個人戰情室' },
+        { id: 'member_nodes', label: '全網結點查詢' },
+      ];
+    }
+    if (['tree_explorer', 'binary_tree', 'monoline'].includes(currentTab)) {
+      return [
+        { id: 'tree_explorer', label: 'BFS 雙軌二元樹' },
+        { id: 'monoline', label: '單軌公排隊列' },
+      ];
+    }
+    if (['settlement', 'store_portal', 'center_portal'].includes(currentTab)) {
+      return [
+        { id: 'settlement', label: '100% 閉環清算試算' },
+        { id: 'store_portal', label: '營業店管理與 6 代輔導' },
+        { id: 'center_portal', label: '教育中心管理與 6 代培訓' },
+      ];
+    }
+    if (['hq_db_admin', 'crm_events', 'gas_api'].includes(currentTab)) {
+      return [
+        { id: 'hq_db_admin', label: '總部資料庫維護 (最高權限)' },
+        { id: 'crm_events', label: '通訊錄與活動 (CM/CT/EM/ET)' },
+        { id: 'gas_api', label: 'GAS 後端 / MySQL 擴容 & API' },
+      ];
+    }
+    return [];
+  };
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <ViewportToolbar
-        mode={viewportMode}
-        isNativeFullscreen={isNativeFullscreen}
-        onSelectMode={handleSelectViewportMode}
-        fontPrefs={fontPrefs}
-        onChangeFontPrefs={handleChangeFontPrefs}
-        onOpenShareModal={() => setShareDeployModal({ open: true, tab: 'share' })}
-        onOpenDeployModal={() => setShareDeployModal({ open: true, tab: 'deploy' })}
+  const activeHqSubNavItems = getActiveHqSubNavItems();
+  const isFullBleed = viewportMode === 'fullscreen';
+  const isMobileMode = viewportMode === 'mobile';
+
+  const authScrollContent = (
+    <>
+      <LineInAppBanner />
+      {/* Top Bar strictly obeying 3-Zone Contract & Mobile Left Drawer */}
+      <Header
+        session={session}
+        navItems={navItems}
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        onLogout={handleLogout}
+        fullWidth={isFullBleed}
+        lockedPortalRole={lockedPortalRole}
+        onOpenMobileDrawer={() => setMobileDrawerOpen((v) => !v)}
+        mobileDrawerOpen={mobileDrawerOpen}
+        isMobileMode={isMobileMode}
       />
 
-      <div className="flex-1 bg-slate-950 overflow-x-auto flex flex-col">
-        <div data-viewport={viewportMode} className={getViewportWrapperClass()}>
-          <LineInAppBanner />
-          {/* Top Bar strictly obeying 3-Zone Contract & Role Scope */}
-          <Header
-            session={session}
-            navItems={navItems}
-            currentTab={currentTab}
-            onSelectTab={setCurrentTab}
-            onLogout={handleLogout}
-            fullWidth={isFullBleed}
-            lockedPortalRole={lockedPortalRole}
-          />
-
-          <main
-            className={`flex-1 ${
-              isFullBleed ? 'max-w-none' : 'max-w-7xl'
-            } w-full mx-auto px-4 sm:px-6 lg:px-8 py-8`}
-          >
+      <main
+        className={`ais-app-main flex-1 ${
+          isFullBleed ? 'max-w-none' : 'max-w-7xl'
+        } w-full mx-auto px-4 sm:px-6 lg:px-8 py-8`}
+      >
         {/* ================= ROLE 1: HQ STAFF PORTAL (FULL ADMIN ACCESS · LAZY LOADED) ================= */}
         {session.role === 'HQ_STAFF' && (
           <Suspense
@@ -763,6 +877,13 @@ export default function App() {
             )}
 
             {currentTab === 'gas_api' && <GasCodeAndApiView />}
+
+            {currentTab === 'hq_db_admin' && (
+              <HqDatabaseAdminView
+                onDatabaseChanged={refreshStats}
+                onNavigateToGasCode={() => setCurrentTab('gas_api')}
+              />
+            )}
           </Suspense>
         )}
 
@@ -873,6 +994,53 @@ export default function App() {
         )}
       </main>
 
+      {/* Scoped Footer */}
+      <footer className="border-t border-slate-800/80 bg-slate-900/50 py-6 pb-16 sm:pb-6 text-xs text-slate-400">
+        <div
+          className={`${
+            isFullBleed ? 'max-w-none' : 'max-w-7xl'
+          } mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4`}
+        >
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-center sm:text-left">
+            <span className="font-semibold text-slate-300">
+              {session.role === 'HQ_STAFF'
+                ? '產銷合一物流直銷單軌轉雙軌 SaaS ERP 系統'
+                : '企業智能雲端營運平台'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>角色權限嚴格隔離視角 ({session.displayName})</span>
+          </div>
+          <div className="font-mono text-slate-500 text-center sm:text-right">
+            {session.role === 'HQ_STAFF'
+              ? '定海神針: C-25000001 · 旗艦領袖: A-00001113 · 閉環 100 點零沉澱'
+              : '3 大 AI 智能雲端工具 · 伺服器加密授權保護'}
+          </div>
+        </div>
+      </footer>
+    </>
+  );
+
+  const authOverlayContent = (
+    <>
+      <MobileSettingsDrawer
+        isOpen={mobileDrawerOpen}
+        onClose={() => setMobileDrawerOpen(false)}
+        session={session}
+        lockedPortalRole={lockedPortalRole}
+        navItems={navItems}
+        subNavItems={activeHqSubNavItems}
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        onLogout={handleLogout}
+        viewportMode={viewportMode}
+        isNativeFullscreen={isNativeFullscreen}
+        onSelectViewportMode={handleSelectViewportMode}
+        fontPrefs={fontPrefs}
+        onChangeFontPrefs={handleChangeFontPrefs}
+        onOpenShareModal={() => setShareDeployModal({ open: true, tab: 'share' })}
+        onOpenDeployModal={() => setShareDeployModal({ open: true, tab: 'deploy' })}
+      />
+
       {/* HQ-Only Floating Bottom Quick Toolbar & Global Lookup Modal */}
       {session.role === 'HQ_STAFF' && (
         <>
@@ -906,32 +1074,37 @@ export default function App() {
           </Suspense>
         </>
       )}
+    </>
+  );
 
-          {/* Scoped Footer */}
-          <footer className="border-t border-slate-800/80 bg-slate-900/50 py-6 text-xs text-slate-400">
-            <div
-              className={`${
-                isFullBleed ? 'max-w-none' : 'max-w-7xl'
-              } mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-300">
-                  {session.role === 'HQ_STAFF'
-                    ? '產銷合一物流直銷單軌轉雙軌 SaaS ERP 系統'
-                    : '企業智能雲端營運平台'}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>角色權限嚴格隔離視角 ({session.displayName})</span>
-              </div>
-              <div className="font-mono text-slate-500">
-                {session.role === 'HQ_STAFF'
-                  ? '定海神針: C-25000001 · 旗艦領袖: A-00001113 · 閉環 100 點零沉澱'
-                  : '3 大 AI 智能雲端工具 · 伺服器加密授權保護'}
-              </div>
-            </div>
-          </footer>
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      <ViewportToolbar
+        mode={viewportMode}
+        isNativeFullscreen={isNativeFullscreen}
+        onSelectMode={handleSelectViewportMode}
+        fontPrefs={fontPrefs}
+        onChangeFontPrefs={handleChangeFontPrefs}
+        onOpenShareModal={() => setShareDeployModal({ open: true, tab: 'share' })}
+        onOpenDeployModal={() => setShareDeployModal({ open: true, tab: 'deploy' })}
+      />
+
+      {isMobileMode ? (
+        <MobileDeviceShell
+          preset={mobilePreset}
+          onChangePreset={setMobilePreset}
+          onExitMobileMode={() => handleSelectViewportMode('desktop')}
+          scrollContent={authScrollContent}
+          overlayContent={authOverlayContent}
+        />
+      ) : (
+        <div className="flex-1 bg-slate-950 overflow-x-auto flex flex-col">
+          <div data-viewport={viewportMode} className={getViewportWrapperClass()}>
+            {authScrollContent}
+            {authOverlayContent}
+          </div>
         </div>
-      </div>
+      )}
 
       <PublicShareDeployModal
         isOpen={shareDeployModal.open}
