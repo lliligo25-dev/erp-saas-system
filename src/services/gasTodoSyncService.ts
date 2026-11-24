@@ -151,7 +151,7 @@ export function getDueTodayCount(memberMid: string): number {
 }
 
 export const DEFAULT_GAS_WEB_APP_URL =
-  'https://script.google.com/macros/s/AKfycbxMB3G4rw8h1SqJnlyoCgE7xuGn6Fpc2QSJa1m3xVzyVXosb10fXrWoHkf87_V0nxJb/exec';
+  'https://script.google.com/macros/s/AKfycbytTIOhZeHybwk1bMUyAn6N7qHUwdBGm2oZTX19XznuoqkJucP74dPNbq-yyhm-hMwB/exec';
 
 export function getGasWebAppUrl(): string {
   try {

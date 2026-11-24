@@ -116,27 +116,25 @@ export class ERPEngine {
           } else {
             this.initSampleCenters();
           }
-          if (parsed.contacts && parsed.contacts.length > 0) {
+          if (parsed.contacts && Array.isArray(parsed.contacts)) {
             this.contacts = new Map(parsed.contacts);
-          } else {
-            this.initSampleContactsAndEvents();
           }
-          if (parsed.contactTrackings && parsed.contactTrackings.length > 0) {
+          if (parsed.contactTrackings && Array.isArray(parsed.contactTrackings)) {
             this.contactTrackings = new Map(parsed.contactTrackings);
           }
           if (parsed.events && parsed.events.length > 0) {
             this.events = new Map(parsed.events);
+          } else {
+            this.initDefaultPublicEvents();
           }
           if (parsed.eventTrackings && parsed.eventTrackings.length > 0) {
             this.eventTrackings = new Map(parsed.eventTrackings);
           }
           this.initHqStaffs();
-          if (parsed.bookingProfiles && parsed.bookingProfiles.length > 0) {
+          if (parsed.bookingProfiles && Array.isArray(parsed.bookingProfiles)) {
             this.bookingProfiles = new Map(parsed.bookingProfiles);
-          } else {
-            this.initSampleBookings();
           }
-          if (parsed.bookingAppointments && parsed.bookingAppointments.length > 0) {
+          if (parsed.bookingAppointments && Array.isArray(parsed.bookingAppointments)) {
             this.bookingAppointments = new Map(parsed.bookingAppointments);
           }
 
@@ -153,11 +151,7 @@ export class ERPEngine {
           this.abanyTechAccumulated = parsed.abanyTechAccumulated || 0;
           this.hqOpsAccumulated = parsed.hqOpsAccumulated || 0;
 
-          if (!this.members.has('A-00001')) {
-            this.seedInitialDemoMembers();
-            if (this.bookingProfiles.size === 0) {
-              this.initSampleBookings();
-            }
+          if (this.purgeLegacyVirtualDemoData()) {
             this.saveState();
           }
           return;
@@ -182,11 +176,11 @@ export class ERPEngine {
     this.initHqStaffs();
     this.initSampleStores();
     this.initSampleCenters();
-    this.initSampleContactsAndEvents();
-    this.currentMonolineCounter = 0; // 新會員入會從 A-00001 建檔
+    this.initDefaultPublicEvents();
+    this.currentMonolineCounter = 0; // 正式純淨開局：零虛擬會員，第一位真實會員從 A-00001 建檔
     this.currentBinaryCounter = 25000514;
-    this.currentContactCounter = this.contacts.size;
-    this.currentTrackingCounter = this.contactTrackings.size;
+    this.currentContactCounter = 0;
+    this.currentTrackingCounter = 0;
     this.currentEventCounter = this.events.size;
     this.currentEventTrackingCounter = this.eventTrackings.size;
     this.currentBookingLicenseCounter = 0;
@@ -279,12 +273,98 @@ export class ERPEngine {
       }
     }
 
-    // 3. 建立 4 位創始範例會員 (A-00001 ~ A-00004) 讓會員/店長/主任/CRM 登入直接互通
-    this.seedInitialDemoMembers();
-    // 4. 初始化第 3 種 AI 系統：個人預約系統範例資料
-    this.initSampleBookings();
-
+    // 3. 正式純淨營運模式：不預先建立虛擬範例會員（王大明等），等待 Google 試算表回讀或真實會員開通
     this.saveState();
+  }
+
+  /**
+   * 清除舊版快取殘留的 4 筆虛擬示範會員與對應假聯絡人／假預約資料
+   */
+  private purgeLegacyVirtualDemoData(): boolean {
+    const legacyDemoSignatures = new Set([
+      '王大明|0912-345-678',
+      '李美華|0922-666-888',
+      '張志豪|0933-555-777',
+      '陳冠宇|0955-123-987',
+    ]);
+    let changed = false;
+    const removedMids = new Set<string>();
+
+    for (const [mid, m] of Array.from(this.members.entries())) {
+      if (legacyDemoSignatures.has(`${m.name}|${m.phone}`)) {
+        this.members.delete(mid);
+        removedMids.add(mid);
+        changed = true;
+      }
+    }
+
+    if (removedMids.size > 0) {
+      for (const [nid, n] of Array.from(this.monolineNodes.entries())) {
+        if (removedMids.has(n.mid)) {
+          this.monolineNodes.delete(nid);
+        }
+      }
+      for (const [nid, n] of Array.from(this.binaryNodes.entries())) {
+        if (removedMids.has(n.mid) && n.type !== 'BINARY_ROOT' && n.type !== 'BINARY_HQ_POOL') {
+          const parent = this.binaryNodes.get(n.parentId);
+          if (parent) {
+            if (parent.leftChildId === nid) parent.leftChildId = undefined;
+            if (parent.rightChildId === nid) parent.rightChildId = undefined;
+          }
+          this.binaryNodes.delete(nid);
+        }
+      }
+      for (const [cid, c] of Array.from(this.contacts.entries())) {
+        if (legacyDemoSignatures.has(`${c.name}|${c.phone}`) || (c.memberMid && removedMids.has(c.memberMid))) {
+          this.contacts.delete(cid);
+        }
+      }
+      for (const [tid, t] of Array.from(this.contactTrackings.entries())) {
+        if (t.memberMid && removedMids.has(t.memberMid)) {
+          this.contactTrackings.delete(tid);
+        }
+      }
+      for (const [mid, bp] of Array.from(this.bookingProfiles.entries())) {
+        if (removedMids.has(mid) || bp.ownerName === '王大明' || bp.ownerName === '李美華') {
+          this.bookingProfiles.delete(mid);
+        }
+      }
+      for (const [aid, ap] of Array.from(this.bookingAppointments.entries())) {
+        if (removedMids.has(ap.ownerMid)) {
+          this.bookingAppointments.delete(aid);
+        }
+      }
+      this.recomputeCounters();
+    }
+
+    return changed;
+  }
+
+  private recomputeCounters() {
+    let maxMono = 0;
+    for (const m of this.members.values()) {
+      const mNum = parseInt(m.mid.replace(/^A-/, ''), 10);
+      if (!isNaN(mNum) && mNum !== 1113 && mNum < 25000000 && mNum > maxMono) {
+        maxMono = mNum;
+      }
+    }
+    for (const n of this.monolineNodes.values()) {
+      const cNum = parseInt(n.nodeId.replace(/^C-/, ''), 10);
+      if (!isNaN(cNum) && cNum !== 1113 && cNum < 25000000 && cNum > maxMono) {
+        maxMono = cNum;
+      }
+    }
+    this.currentMonolineCounter = maxMono;
+
+    const hasHqPool = Array.from(this.binaryNodes.values()).some((n) => n.type === 'BINARY_HQ_POOL');
+    let maxBi = hasHqPool ? 25000514 : 25000001;
+    for (const n of this.binaryNodes.values()) {
+      const bNum = parseInt(n.nodeId.replace(/^C-/, ''), 10);
+      if (!isNaN(bNum) && bNum > maxBi) {
+        maxBi = bNum;
+      }
+    }
+    this.currentBinaryCounter = maxBi;
   }
 
   private initHqStaffs() {
@@ -578,54 +658,54 @@ export class ERPEngine {
       {
         storeId: 'S-TAIPEI-01',
         name: '台北大安忠孝旗艦經營店',
-        managerMid: 'A-00001',
-        managerName: '王大明',
+        managerMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        managerName: '台北區指派店長',
         phone: '02-2771-8899',
         address: '台北市大安區忠孝東路四段 120 號',
         parentStoreId: 'S-HQ-01', // 第 1 代直屬輔導店
         establishedAt: new Date(now.getTime() - 90 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 860,
-        balance: 860,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         storeId: 'S-BANQIAO-01',
         name: '新北板橋文化經營店',
-        managerMid: 'A-00002',
-        managerName: '李美華',
+        managerMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        managerName: '新北區指派店長',
         phone: '02-8951-6677',
         address: '新北市板橋區文化路一段 188 號',
         parentStoreId: 'S-TAIPEI-01', // 第 2 代輔導店
         establishedAt: new Date(now.getTime() - 60 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 420,
-        balance: 420,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         storeId: 'S-TAOYUAN-01',
         name: '桃園藝文特區中正經營店',
-        managerMid: 'A-00003',
-        managerName: '張志豪',
+        managerMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        managerName: '桃園區指派店長',
         phone: '03-316-5588',
         address: '桃園市桃園區中正路 1188 號',
         parentStoreId: 'S-BANQIAO-01', // 第 3 代輔導店
         establishedAt: new Date(now.getTime() - 45 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 260,
-        balance: 260,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         storeId: 'S-TAICHUNG-01',
         name: '台中西屯七期市政經營店',
-        managerMid: 'A-00004',
-        managerName: '陳冠宇',
+        managerMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        managerName: '台中區指派店長',
         phone: '04-2258-9911',
         address: '台中市西屯區市政北二路 238 號',
         parentStoreId: 'S-TAOYUAN-01', // 第 4 代輔導店
         establishedAt: new Date(now.getTime() - 30 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 150,
-        balance: 150,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         storeId: 'S-TAINAN-01',
@@ -693,54 +773,54 @@ export class ERPEngine {
       {
         centerId: 'EDU-TAIPEI-01',
         name: '台北忠孝國際教育訓練中心',
-        directorMid: 'A-00001',
-        directorName: '王大明',
+        directorMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        directorName: '台北區培訓主任',
         phone: '02-2771-9900',
         address: '台北市大安區忠孝東路四段 128 號 12 樓',
         parentCenterId: 'EDU-HQ-01', // 第 1 代直屬培訓中心
         establishedAt: new Date(now.getTime() - 100 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 920,
-        balance: 920,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         centerId: 'EDU-BANQIAO-01',
         name: '新北板橋卓越系統教育中心',
-        directorMid: 'A-00002',
-        directorName: '李美華',
+        directorMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        directorName: '新北區培訓主任',
         phone: '02-8951-8822',
         address: '新北市板橋區文化路一段 190 號 6 樓',
         parentCenterId: 'EDU-TAIPEI-01', // 第 2 代培訓中心
         establishedAt: new Date(now.getTime() - 70 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 480,
-        balance: 480,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         centerId: 'EDU-TAOYUAN-01',
         name: '桃園藝文領袖培育研習中心',
-        directorMid: 'A-00003',
-        directorName: '張志豪',
+        directorMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        directorName: '桃園區培訓主任',
         phone: '03-316-6699',
         address: '桃園市桃園區中正路 1190 號 8 樓',
         parentCenterId: 'EDU-BANQIAO-01', // 第 3 代培訓中心
         establishedAt: new Date(now.getTime() - 50 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 310,
-        balance: 310,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         centerId: 'EDU-TAICHUNG-01',
         name: '台中市政智慧創新教育中心',
-        directorMid: 'A-00004',
-        directorName: '陳冠宇',
+        directorMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
+        directorName: '台中區培訓主任',
         phone: '04-2258-7733',
         address: '台中市西屯區市政北二路 240 號 15 樓',
         parentCenterId: 'EDU-TAOYUAN-01', // 第 4 代培訓中心
         establishedAt: new Date(now.getTime() - 35 * 86400000).toISOString(),
         status: 'ACTIVE',
-        totalSubsidyPoints: 190,
-        balance: 190,
+        totalSubsidyPoints: 0,
+        balance: 0,
       },
       {
         centerId: 'EDU-TAINAN-01',
@@ -788,132 +868,12 @@ export class ERPEngine {
     }
   }
 
-  private initSampleContactsAndEvents() {
-    this.contacts.clear();
-    this.contactTrackings.clear();
+  private initDefaultPublicEvents() {
     this.events.clear();
     this.eventTrackings.clear();
     const now = new Date();
 
-    // 1. 通訊主檔 (CONTACT_M / CM-)
-    // headers: ["ID", "狀態", "姓名", "手機", "電話", "Line", "Email", "地址", "照片連結", "更新時間"]
-    const sampleContacts: ContactMasterRecord[] = [
-      {
-        id: 'CM-00001',
-        status: '開通AI軟體1+1',
-        name: '王大明',
-        phone: '0912-345-678',
-        tel: '02-2771-9900',
-        line: 'wang_daming',
-        email: 'daming.wang@example.com',
-        address: '台北市大安區忠孝東路四段 128 號 12 樓',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 15 * 86400000).toISOString(),
-        memberMid: 'A-00001',
-        monolineNodeId: 'C-00001',
-        binaryNodeId: 'C-25000515',
-      },
-      {
-        id: 'CM-00002',
-        status: '開通AI軟體1+1',
-        name: '李美華',
-        phone: '0922-666-888',
-        tel: '02-8951-8822',
-        line: 'meihua_lee',
-        email: 'meihua.lee@example.com',
-        address: '新北市板橋區文化路一段 190 號 6 樓',
-        photoUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 10 * 86400000).toISOString(),
-        memberMid: 'A-00002',
-        monolineNodeId: 'C-00002',
-        binaryNodeId: 'C-25000516',
-      },
-      {
-        id: 'CM-00003',
-        status: '開通AI軟體1+1',
-        name: '張志豪',
-        phone: '0933-555-777',
-        tel: '03-316-6699',
-        line: 'chihhao_chang',
-        email: 'chihhao@example.com',
-        address: '桃園市桃園區中正路 1190 號 8 樓',
-        photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 6 * 86400000).toISOString(),
-        memberMid: 'A-00003',
-        monolineNodeId: 'C-00003',
-        binaryNodeId: 'C-25000517',
-      },
-      {
-        id: 'CM-00004',
-        status: '開通AI軟體1+1',
-        name: '陳冠宇',
-        phone: '0955-123-987',
-        tel: '04-2258-7733',
-        line: 'kuanyu_chen',
-        email: 'kuanyu@example.com',
-        address: '台中市西屯區市政北二路 240 號 15 樓',
-        photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 3 * 86400000).toISOString(),
-        memberMid: 'A-00004',
-        monolineNodeId: 'C-00004',
-        binaryNodeId: 'C-25000518',
-      },
-    ];
-    for (const c of sampleContacts) {
-      this.contacts.set(c.id, c);
-    }
-    this.currentContactCounter = 4;
-
-    // 2. 聯繫紀錄 (CONTACT_T / CT-)
-    // headers: ["ID", "狀態", "姓名", "聯繫日期", "聯繫方式", "洽談內容", "下一步計畫", "照片連結", "更新時間"]
-    const sampleTrackings: ContactTrackingRecord[] = [
-      {
-        id: 'CT-00001',
-        status: '開通體驗',
-        name: '王大明',
-        contactDate: new Date(now.getTime() - 15 * 86400000).toISOString().split('T')[0],
-        contactMethod: '線上開通',
-        discussionContent: '新會員開通 AI 軟體 1+1 (第 1 組單軌體驗 C-00001 + 第 2 組雙軌卡位 C-25000515)，已啟動 30 天雙發免費體驗。',
-        nextStepPlan: '引導登入 AI 軟體系統體驗 15 代公排互助與雙軌滑落，邀約參加 EM-00001 實體說明會。',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 15 * 86400000).toISOString(),
-        contactId: 'CM-00001',
-        memberMid: 'A-00001',
-      },
-      {
-        id: 'CT-00002',
-        status: '已洽談',
-        name: '李美華',
-        contactDate: new Date(now.getTime() - 8 * 86400000).toISOString().split('T')[0],
-        contactMethod: 'Line',
-        discussionContent: '會員反饋 AI 軟體操作流暢，深入了解 100 元月租閉環平帳算力池機制，有意開展新北板橋地區團隊。',
-        nextStepPlan: '安排前往板橋教育中心 (EDU-BANQIAO-01) 進行經營店長進階培訓。',
-        photoUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 8 * 86400000).toISOString(),
-        contactId: 'CM-00002',
-        memberMid: 'A-00002',
-      },
-      {
-        id: 'CT-00003',
-        status: '待跟進',
-        name: '張志豪',
-        contactDate: new Date(now.getTime() - 3 * 86400000).toISOString().split('T')[0],
-        contactMethod: '電話訪問',
-        discussionContent: '協助指導雙軌安置樹狀圖閱讀方式，說明 BFS 智慧滑落至全網第一個開放空缺之價值。',
-        nextStepPlan: '於下週一回訪續約情況，協助規劃月租 100% 閉環分潤池。',
-        photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-        updatedAt: new Date(now.getTime() - 3 * 86400000).toISOString(),
-        contactId: 'CM-00003',
-        memberMid: 'A-00003',
-      },
-    ];
-    for (const t of sampleTrackings) {
-      this.contactTrackings.set(t.id, t);
-    }
-    this.currentTrackingCounter = 3;
-
-    // 3. 活動主檔 (EVENT_M / EM-)
-    // headers: ["ID", "狀態", "活動主題", "日期", "地點", "預算", "負責人", "備註", "照片連結", "更新時間"]
+    // 活動主檔 (EVENT_M / EM-) 僅保留總部官方公告活動範本，不塞入虛擬會員
     const sampleEvents: EventMasterRecord[] = [
       {
         id: 'EM-00001',
@@ -922,11 +882,11 @@ export class ERPEngine {
         date: '2026-11-20',
         location: '台北市大安區忠孝東路四段 128 號 12 樓 (台北教育中心)',
         budget: 35000,
-        leader: '王大明 (A-00001)',
+        leader: '總部活動企劃團隊',
         notes: '現場安排 AI 軟體 1+1 雙發開通教學、100% 閉環撥發平帳公式解析與精緻茶點。',
         photoUrl: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80',
         updatedAt: new Date(now.getTime() - 5 * 86400000).toISOString(),
-        participantsCount: 86,
+        participantsCount: 0,
       },
       {
         id: 'EM-00002',
@@ -935,11 +895,11 @@ export class ERPEngine {
         date: '2026-11-28',
         location: '台中市西屯區市政北二路 240 號 15 樓 (台中教育中心)',
         budget: 60000,
-        leader: '陳冠宇 (A-00004)',
+        leader: '總部教育培訓中心',
         notes: '全國 6 代輔導經營店店長與 6 代教育訓練總監聯席會議，研擬連鎖擴店戰略。',
         photoUrl: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=800&auto=format&fit=crop&q=80',
         updatedAt: new Date(now.getTime() - 2 * 86400000).toISOString(),
-        participantsCount: 42,
+        participantsCount: 0,
       },
     ];
     for (const e of sampleEvents) {
@@ -3404,13 +3364,71 @@ export class ERPEngine {
       return /^9\d{8}$/.test(s) ? `0${s}` : s;
     };
 
+    const VALID_NODE_STATUSES = new Set<NodeStatus>([
+      'HQ_LOCKED',
+      'TRIAL_ACTIVE',
+      'ACTIVE_RENEWED',
+      'EXPIRED_FROZEN',
+    ]);
+    const parseNodeStatus = (raw: any): NodeStatus | null => {
+      const s = String(raw ?? '').trim().toUpperCase() as NodeStatus;
+      return VALID_NODE_STATUSES.has(s) ? s : null;
+    };
+
     let importedMembers = 0;
     let importedMonoline = 0;
     let importedBinary = 0;
     let importedContacts = 0;
     let importedTrackings = 0;
 
+    // 以試算表為唯一權威來源：先清掉所有非旗艦錨點之虛擬／舊資料，再完整重建
+    const flagshipMid = GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
+    const sheetUsesDirectBinarySlots =
+      Array.isArray(payload.binaryNodes) &&
+      payload.binaryNodes.some((row) => {
+        const nid = String(row?.nodeId || '').trim().toUpperCase();
+        const rowMid = String(row?.mid || '').trim().toUpperCase();
+        const bNum = parseInt(nid.replace(/^C-/, ''), 10);
+        return !isNaN(bNum) && bNum >= 25000002 && bNum <= 25000514 && Boolean(rowMid) && rowMid !== flagshipMid;
+      });
+
     if (Array.isArray(payload.members)) {
+      for (const mid of Array.from(this.members.keys())) {
+        if (mid !== flagshipMid) {
+          this.members.delete(mid);
+        }
+      }
+      this.monolineNodes.clear();
+      if (sheetUsesDirectBinarySlots) {
+        // 試算表雙軌節點直接從 C-25000002 起算（無 513 席 HQ 佔位池）：清掉非根節點避免幽靈池節點掛在真實會員下方
+        for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
+          if (node.type !== 'BINARY_ROOT') {
+            this.binaryNodes.delete(nid);
+          } else {
+            node.leftChildId = undefined;
+            node.rightChildId = undefined;
+          }
+        }
+        this.currentBinaryCounter = 25000001;
+      } else {
+        for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
+          if (node.type !== 'BINARY_ROOT' && node.type !== 'BINARY_HQ_POOL') {
+            const parent = this.binaryNodes.get(node.parentId);
+            if (parent) {
+              if (parent.leftChildId === nid) parent.leftChildId = undefined;
+              if (parent.rightChildId === nid) parent.rightChildId = undefined;
+            }
+            this.binaryNodes.delete(nid);
+          }
+        }
+        this.currentBinaryCounter = 25000514;
+      }
+      this.contacts.clear();
+      this.contactTrackings.clear();
+      this.currentMonolineCounter = 0;
+      this.currentContactCounter = 0;
+      this.currentTrackingCounter = 0;
+
       for (const row of payload.members) {
         const mid = String(row?.mid || '').trim().toUpperCase();
         if (!mid) continue;
@@ -3467,22 +3485,72 @@ export class ERPEngine {
         if (!nodeId) continue;
         const existing = this.monolineNodes.get(nodeId);
         const mid = String(row?.mid || existing?.mid || '').trim().toUpperCase();
+        const member = this.members.get(mid);
+
+        // 相容既有 7 欄精簡試算表格式（C欄=層級、D欄=狀態、E欄=到期日、F欄=對應雙軌節點、G欄=累計收益）
+        const isCompact7ColMonoline =
+          (/^\d+$/.test(String(row?.name ?? '').trim()) && !(Number(row?.depth) > 0)) ||
+          parseNodeStatus(row?.parentId) !== null;
+
+        let monoDepth: number;
+        let monoStatus: NodeStatus;
+        let monoParentId: string;
+        let monoName: string;
+        let monoSponsorMid: string;
+        let monoTrialExpiresAt: string;
+        let monoEarnings: number;
+
+        if (isCompact7ColMonoline) {
+          monoDepth = Number(row?.name) > 0 ? Number(row.name) : importedMonoline + 1;
+          monoStatus = parseNodeStatus(row?.parentId) || existing?.status || 'TRIAL_ACTIVE';
+          const numStr = nodeId.replace(/^C-/, '');
+          const cNum = parseInt(numStr, 10);
+          const padLen = Math.max(5, numStr.length);
+          monoParentId =
+            !isNaN(cNum) && cNum > 1
+              ? `C-${String(cNum - 1).padStart(padLen, '0')}`
+              : 'HQ_ROOT';
+          monoName = member ? `${member.name} (第1組-單軌體驗)` : existing?.name || nodeId;
+          monoSponsorMid = member?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
+          monoTrialExpiresAt =
+            member?.trialExpiresAt ||
+            parseIso(row?.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000);
+          const maybeEarnings = Number(row?.status);
+          monoEarnings =
+            !isNaN(maybeEarnings) && String(row?.status ?? '').trim() !== ''
+              ? maybeEarnings
+              : Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0);
+        } else {
+          monoDepth = Number(row?.depth) > 0 ? Number(row.depth) : existing?.depth ?? 1;
+          monoStatus = parseNodeStatus(row?.status) || existing?.status || 'TRIAL_ACTIVE';
+          monoParentId = String(row?.parentId || existing?.parentId || 'HQ_ROOT').trim();
+          monoName = String(
+            row?.name || (member ? `${member.name} (第1組-單軌體驗)` : '') || existing?.name || nodeId
+          ).trim();
+          const rawSponsor = String(row?.sponsorMid || '').trim().toUpperCase();
+          monoSponsorMid = /^A-\d+$/i.test(rawSponsor)
+            ? rawSponsor
+            : member?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
+          monoTrialExpiresAt = row?.trialExpiresAt
+            ? parseIso(row.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000)
+            : member?.trialExpiresAt || parseIso(undefined, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000);
+          monoEarnings = Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0);
+        }
+
         const node: NodeRecord = {
           nodeId,
           mid,
-          name: String(row?.name || existing?.name || nodeId).trim(),
+          name: monoName,
           type: 'MONOLINE',
           track: 'MONOLINE',
-          status: (row?.status as NodeStatus) || existing?.status || 'TRIAL_ACTIVE',
-          parentId: String(row?.parentId || existing?.parentId || 'HQ_ROOT').trim(),
+          status: monoStatus,
+          parentId: monoParentId,
           placementPosition: 'MONOLINE_QUEUE',
-          depth: Number(row?.depth ?? existing?.depth ?? 1),
-          sponsorMid: String(row?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
-            .trim()
-            .toUpperCase(),
-          hqPermanentLocked: Boolean(row?.hqPermanentLocked ?? existing?.hqPermanentLocked ?? false),
-          trialExpiresAt: parseIso(row?.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000),
-          totalEarnings: Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0),
+          depth: monoDepth,
+          sponsorMid: monoSponsorMid,
+          hqPermanentLocked: Boolean(row?.hqPermanentLocked ?? existing?.hqPermanentLocked ?? (monoStatus === 'HQ_LOCKED')),
+          trialExpiresAt: monoTrialExpiresAt,
+          totalEarnings: monoEarnings,
           softwareKey: existing?.softwareKey || 'CONTACT',
           softwareTitle: existing?.softwareTitle || '通訊錄 CRM (1+1單軌)',
         };
@@ -3501,30 +3569,109 @@ export class ERPEngine {
         const nodeId = String(row?.nodeId || '').trim().toUpperCase();
         if (!nodeId) continue;
         const existing = this.binaryNodes.get(nodeId);
+        const mid = String(row?.mid || existing?.mid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
+          .trim()
+          .toUpperCase();
+        const member = this.members.get(mid);
         const posRaw = String(row?.placementPosition || existing?.placementPosition || 'L').trim().toUpperCase();
         const placementPosition: NodeRecord['placementPosition'] =
           posRaw === 'ROOT' || posRaw === 'L' || posRaw === 'R' ? posRaw : 'L';
+
+        // 相容既有 11 欄精簡試算表格式（C欄=推薦人MID、I欄=狀態、J欄=到期日、K欄=累計收益）
+        const isCompact11ColBinary =
+          parseNodeStatus(row?.sponsorMid) !== null && parseNodeStatus(row?.status) === null;
+
+        let binStatus: NodeStatus;
+        let binSponsorMid: string;
+        let binName: string;
+        let binTrialExpiresAt: string;
+        let binHqLocked: boolean;
+        let binEarnings: number;
+
+        if (isCompact11ColBinary) {
+          binStatus = parseNodeStatus(row?.sponsorMid) || existing?.status || 'TRIAL_ACTIVE';
+          const maybeSponsor = String(row?.name || '').trim().toUpperCase();
+          binSponsorMid = /^A-\d+$/i.test(maybeSponsor)
+            ? maybeSponsor
+            : member?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
+          binName =
+            nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
+              ? '雙軌定海神針 (Binary Root Node)'
+              : member
+                ? `${member.name} (第2組-雙軌分身)`
+                : existing?.name || nodeId;
+          binTrialExpiresAt = row?.status
+            ? parseIso(row.status, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000)
+            : member?.trialExpiresAt || parseIso(undefined, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000);
+          binHqLocked = binStatus === 'HQ_LOCKED' || nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID;
+          binEarnings = Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0);
+        } else {
+          binStatus = parseNodeStatus(row?.status) || existing?.status || 'TRIAL_ACTIVE';
+          const rawSponsor = String(row?.sponsorMid || '').trim().toUpperCase();
+          binSponsorMid = /^A-\d+$/i.test(rawSponsor)
+            ? rawSponsor
+            : member?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
+          binName = String(
+            row?.name ||
+              (nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
+                ? '雙軌定海神針 (Binary Root Node)'
+                : member
+                  ? `${member.name} (第2組-雙軌分身)`
+                  : '') ||
+              existing?.name ||
+              nodeId
+          ).trim();
+          binTrialExpiresAt = row?.trialExpiresAt
+            ? parseIso(row.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000)
+            : member?.trialExpiresAt || parseIso(undefined, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000);
+          binHqLocked = Boolean(
+            row?.hqPermanentLocked ??
+              existing?.hqPermanentLocked ??
+              (binStatus === 'HQ_LOCKED' || nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID)
+          );
+          binEarnings = Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0);
+        }
+
+        const parentRaw = String(
+          row?.parentId || existing?.parentId || GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
+        ).trim();
+        const parentId =
+          nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID || parentRaw.toUpperCase() === 'ROOT'
+            ? 'SYSTEM_ROOT'
+            : parentRaw.toUpperCase();
+
+        const nodeType: NodeRecord['type'] =
+          nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
+            ? 'BINARY_ROOT'
+            : mid === flagshipMid && (binStatus === 'HQ_LOCKED' || binHqLocked)
+              ? 'BINARY_HQ_POOL'
+              : 'BINARY_MEMBER_SLOT';
+
+        const leftChildId =
+          row?.leftChildId !== undefined
+            ? String(row.leftChildId || '').trim().toUpperCase() || undefined
+            : existing?.leftChildId;
+        const rightChildId =
+          row?.rightChildId !== undefined
+            ? String(row.rightChildId || '').trim().toUpperCase() || undefined
+            : existing?.rightChildId;
+
         const node: NodeRecord = {
           nodeId,
-          mid: String(row?.mid || existing?.mid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID).trim().toUpperCase(),
-          name: String(row?.name || existing?.name || nodeId).trim(),
-          type:
-            nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
-              ? 'BINARY_ROOT'
-              : existing?.type || 'BINARY_MEMBER_SLOT',
+          mid,
+          name: binName,
+          type: nodeType,
           track: 'BINARY',
-          status: (row?.status as NodeStatus) || existing?.status || 'TRIAL_ACTIVE',
-          parentId: String(row?.parentId || existing?.parentId || GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID).trim(),
+          status: binStatus,
+          parentId,
           placementPosition,
-          depth: Number(row?.depth ?? existing?.depth ?? 1),
-          leftChildId: String(row?.leftChildId || existing?.leftChildId || '').trim().toUpperCase() || undefined,
-          rightChildId: String(row?.rightChildId || existing?.rightChildId || '').trim().toUpperCase() || undefined,
-          sponsorMid: String(row?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
-            .trim()
-            .toUpperCase(),
-          hqPermanentLocked: Boolean(row?.hqPermanentLocked ?? existing?.hqPermanentLocked ?? false),
-          trialExpiresAt: parseIso(row?.trialExpiresAt, GLOBAL_BOUNDARIES.TRIAL_DAYS * 86400000),
-          totalEarnings: Number(row?.totalEarnings ?? existing?.totalEarnings ?? 0),
+          depth: Number(row?.depth ?? existing?.depth ?? (nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID ? 0 : 1)),
+          leftChildId,
+          rightChildId,
+          sponsorMid: binSponsorMid,
+          hqPermanentLocked: binHqLocked,
+          trialExpiresAt: binTrialExpiresAt,
+          totalEarnings: binEarnings,
           softwareKey: existing?.softwareKey || 'EVENT',
           softwareTitle: existing?.softwareTitle || '活動行銷 (1+1雙軌)',
         };

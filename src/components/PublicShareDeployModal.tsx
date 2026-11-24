@@ -912,6 +912,9 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
                         placeholder="https://script.google.com/macros/s/.../exec"
                         className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
                       />
+                      <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                        💡 永久綁定提醒：Render 免費主機休眠重啟時會重設暫存設定檔，建議同時到 Render 控制台的 <code className="text-sky-300">Environment</code> 新增環境變數 <code className="text-emerald-300">GAS_WEB_APP_URL</code> = 您最新試算表的 <code className="text-emerald-300">/exec</code> 網址，即可保證每次喚醒自動回讀真實會員！
+                      </p>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-3">

@@ -9,9 +9,12 @@ import path from 'node:path';
 const SERVER_DATA_DIR = path.resolve(process.cwd(), '.erp-server-data');
 const BRIDGE_STATE_FILE = path.join(SERVER_DATA_DIR, 'gas-bridge.json');
 
+const LEGACY_DEPRECATED_GAS_EXEC_URL =
+  'https://script.google.com/macros/s/AKfycbxMB3G4rw8h1SqJnlyoCgE7xuGn6Fpc2QSJa1m3xVzyVXosb10fXrWoHkf87_V0nxJb/exec';
+
 export const DEFAULT_SERVER_GAS_EXEC_URL =
   process.env.GAS_WEB_APP_URL ||
-  'https://script.google.com/macros/s/AKfycbxMB3G4rw8h1SqJnlyoCgE7xuGn6Fpc2QSJa1m3xVzyVXosb10fXrWoHkf87_V0nxJb/exec';
+  'https://script.google.com/macros/s/AKfycbytTIOhZeHybwk1bMUyAn6N7qHUwdBGm2oZTX19XznuoqkJucP74dPNbq-yyhm-hMwB/exec';
 
 export interface GasBridgeSyncStatus {
   ok: boolean;
@@ -74,7 +77,11 @@ function loadState(): GasBridgeServerState {
   try {
     if (fs.existsSync(BRIDGE_STATE_FILE)) {
       const raw = JSON.parse(fs.readFileSync(BRIDGE_STATE_FILE, 'utf8'));
-      const check = validateGasExecUrl(raw.gasWebAppUrl || DEFAULT_SERVER_GAS_EXEC_URL);
+      const rawUrl =
+        raw.gasWebAppUrl === LEGACY_DEPRECATED_GAS_EXEC_URL
+          ? DEFAULT_SERVER_GAS_EXEC_URL
+          : raw.gasWebAppUrl || DEFAULT_SERVER_GAS_EXEC_URL;
+      const check = validateGasExecUrl(rawUrl);
       return {
         gasWebAppUrl: check.valid ? check.normalized : DEFAULT_SERVER_GAS_EXEC_URL,
         autoSyncEnabled: typeof raw.autoSyncEnabled === 'boolean' ? raw.autoSyncEnabled : true,

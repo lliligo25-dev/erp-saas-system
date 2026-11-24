@@ -235,14 +235,33 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
   // All members for fast switcher
   const allMembers = erpEngine.getAllMembers();
 
-  // Preset fast-login candidates
-  const quickSwitchCandidates = [
-    { mid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID, title: '旗艦領袖 (錨點)', badge: '親推513席' },
-    { mid: 'A-00001', title: '王大明 (創始會員)', badge: '單軌 #1' },
-    { mid: 'A-00002', title: '李美華 (資深店長)', badge: '台北經營店' },
-    { mid: 'A-00003', title: '張志豪 (雙軌領隊)', badge: '雙軌活耀' },
-    { mid: 'A-00004', title: '陳冠宇 (1+1會員)', badge: '新開通' },
-  ];
+  // 若目前選取的編號不存在（例如純淨正式環境尚未開通 A-00001），自動對齊首位真實會員或旗艦錨點
+  useEffect(() => {
+    if (!currentMember && allMembers.length > 0) {
+      const firstReal = allMembers.find((m) => m.mid !== GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID) || allMembers[0];
+      if (firstReal && firstReal.mid !== currentMid) {
+        setCurrentMid(firstReal.mid);
+      }
+    }
+  }, [currentMember, allMembers, currentMid]);
+
+  // Preset fast-login candidates (動態從真實會員名冊讀取，不再顯示虛擬假名單)
+  const quickSwitchCandidates = React.useMemo(() => {
+    const list: Array<{ mid: string; title: string; badge: string }> = [
+      { mid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID, title: '旗艦領袖 (錨點)', badge: '親推513席' },
+    ];
+    allMembers
+      .filter((m) => m.mid !== GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
+      .slice(0, 6)
+      .forEach((m) => {
+        list.push({
+          mid: m.mid,
+          title: `${m.name} (${m.mid})`,
+          badge: m.monolineNodeId || '真實會員',
+        });
+      });
+    return list;
+  }, [allMembers]);
 
   // Save logged in MID to localStorage
   useEffect(() => {
@@ -1844,7 +1863,7 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                 <div className="p-2 rounded bg-slate-950 border border-slate-800">
                   <span className="text-slate-400 block text-[11px]">店長：</span>
                   <span className="text-slate-300">
-                    {memberStore?.managerName || '李美華'} ({memberStore?.managerMid || 'A-00002'})
+                    {memberStore?.managerName || '總部指派店長'} ({memberStore?.managerMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID})
                   </span>
                 </div>
                 <div className="p-2 rounded bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
@@ -1893,7 +1912,7 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                 <div className="p-2 rounded bg-slate-950 border border-slate-800">
                   <span className="text-slate-400 block text-[11px]">中心主任：</span>
                   <span className="text-slate-300">
-                    {memberCenter?.directorName || '張志豪'} ({memberCenter?.directorMid || 'A-00003'})
+                    {memberCenter?.directorName || '總部培訓主任'} ({memberCenter?.directorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID})
                   </span>
                 </div>
                 <div className="p-2 rounded bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
