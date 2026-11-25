@@ -232,6 +232,10 @@ export async function fetchGasHydrationState(): Promise<{
     binaryNodes?: any[];
     contacts?: any[];
     contactTrackings?: any[];
+    events?: any[];
+    eventTrackings?: any[];
+    workspaceRecords?: any[];
+    cloudVaults?: any[];
   };
   error?: string;
 }> {
@@ -290,7 +294,7 @@ export async function forwardErpEventToGas(
 ): Promise<void> {
   if (!bridgeState.autoSyncEnabled || !bridgeState.gasWebAppUrl) return;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 15000);
 
   try {
     const res = await fetch(bridgeState.gasWebAppUrl, {
@@ -414,4 +418,142 @@ export async function sendHqDbMutationToGas(
     return { ok: false, message };
   }
 }
+
+function isValidGoogleDriveOrSheetUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    return host === 'docs.google.com' || host === 'drive.google.com';
+  } catch {
+    return false;
+  }
+}
+
+export async function provisionMemberCloudWorkspaceViaGas(payload: {
+  memberMid: string;
+  memberName: string;
+  tabs?: Array<{ sysType: string; tabName: string; canCreate: boolean; readOnly: boolean }>;
+  rowsBySys?: Record<string, { tabName: string; columns: string[]; rows: Array<Record<string, string>> }>;
+}): Promise<{
+  ok: boolean;
+  folderId?: string;
+  folderName?: string;
+  folderUrl?: string;
+  spreadsheetId?: string;
+  spreadsheetName?: string;
+  spreadsheetUrl?: string;
+  message: string;
+  needsGasUpgrade?: boolean;
+}> {
+  const url = bridgeState.gasWebAppUrl;
+  const check = validateGasExecUrl(url);
+  if (!check.valid) {
+    return { ok: false, message: check.error || '伺服器尚未設定有效的 GAS /exec 網址' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const res = await fetch(check.normalized, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'provisionMemberCloudWorkspace',
+        memberMid: payload.memberMid,
+        memberName: payload.memberName,
+        tabs: payload.tabs || [],
+        rowsBySys: payload.rowsBySys || null,
+      }),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        message: `GAS 雲端建檔回應 HTTP ${res.status}，請確認 Apps Script 已部署為「所有人」可存取`,
+      };
+    }
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return {
+        ok: false,
+        needsGasUpgrade: /<!doctype|<html/i.test(text),
+        message:
+          'GAS 尚未回傳 JSON（請至 Apps Script 貼上最新版 Code.gs、授權 Google Drive 權限並建立新版本部署）',
+      };
+    }
+
+    const data = parsed?.data && typeof parsed.data === 'object' ? parsed.data : parsed;
+    if (!parsed || parsed.success === false) {
+      const errStr = String(parsed?.error || 'GAS 建立會員試算表失敗');
+      const needsGasUpgrade = /未知的 API 動作|Unknown action|DriveApp|permission|權限/i.test(errStr);
+      return {
+        ok: false,
+        needsGasUpgrade,
+        message: errStr,
+      };
+    }
+
+    const spreadsheetId = String(data?.spreadsheetId || '').trim();
+    const folderId = String(data?.folderId || '').trim();
+    const rawSpreadsheetUrl = String(
+      data?.spreadsheetUrl || (spreadsheetId ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}` : '')
+    ).trim();
+    const rawFolderUrl = String(
+      data?.folderUrl || (folderId ? `https://drive.google.com/drive/folders/${folderId}` : '')
+    ).trim();
+
+    if (
+      !spreadsheetId ||
+      spreadsheetId.startsWith('GSHEET-') ||
+      !isValidGoogleDriveOrSheetUrl(rawSpreadsheetUrl)
+    ) {
+      return {
+        ok: false,
+        needsGasUpgrade: true,
+        message:
+          'GAS 尚未回傳有效的 Google 試算表 ID（請確認新版 Code.gs 已部署並完成 DriveApp 權限授權）',
+      };
+    }
+
+    const safeFolderUrl = isValidGoogleDriveOrSheetUrl(rawFolderUrl) ? rawFolderUrl : '';
+    const msg =
+      String(data?.message || '').trim() ||
+      `已於 Google Drive 建立專屬試算表 (${spreadsheetId})，現在可直接開啟！`;
+
+    bridgeState.lastSyncStatus = {
+      ok: true,
+      action: 'provisionMemberCloudWorkspace',
+      message: msg,
+      timestamp: new Date().toISOString(),
+    };
+    saveState();
+
+    return {
+      ok: true,
+      folderId,
+      folderName: String(data?.folderName || '').trim(),
+      folderUrl: safeFolderUrl,
+      spreadsheetId,
+      spreadsheetName: String(data?.spreadsheetName || '').trim(),
+      spreadsheetUrl: rawSpreadsheetUrl,
+      message: msg,
+    };
+  } catch (err: any) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      message: `連線 GAS 建立真實 Google 試算表逾時或失敗：${err?.message || '網路異常'}`,
+    };
+  }
+}
+
 

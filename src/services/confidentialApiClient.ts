@@ -167,7 +167,10 @@ export async function apiSyncErpAction(
   try {
     const res = await fetch('/api/erp/sync-action', {
       method: 'POST',
-      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+      headers: buildAuthHeaders({
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      }),
       credentials: 'include',
       body: JSON.stringify({ action, payload }),
     });
@@ -500,5 +503,112 @@ export async function apiHqDbDeleteNode(
     return { ok: false, error: '刪除節點資料連線異常' };
   }
 }
+
+export interface MemberWorkspaceCloudPayload {
+  ok: boolean;
+  mid?: string;
+  unlockedPacks?: string[] | null;
+  recordsBySys?: Record<string, Array<Record<string, any>>>;
+  bootstrap?: ScopedBootstrapPayload;
+  syncedAt?: string;
+  error?: string;
+}
+
+export async function apiFetchMemberWorkspace(
+  mid: string
+): Promise<MemberWorkspaceCloudPayload> {
+  try {
+    const res = await fetch(`/api/member/workspace/${encodeURIComponent(mid)}`, {
+      method: 'GET',
+      headers: buildAuthHeaders(),
+      credentials: 'include',
+    });
+    return (await res.json()) as MemberWorkspaceCloudPayload;
+  } catch {
+    return { ok: false, error: '無法連線至雲端同步伺服器' };
+  }
+}
+
+export async function apiSaveMemberWorkspaceRecord(
+  mid: string,
+  sysType: string,
+  record: Record<string, any>
+): Promise<{ ok: boolean; record?: Record<string, any>; error?: string }> {
+  try {
+    const res = await fetch(`/api/member/workspace/${encodeURIComponent(mid)}/record`, {
+      method: 'POST',
+      headers: buildAuthHeaders({
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      }),
+      credentials: 'include',
+      body: JSON.stringify({ sysType, record }),
+    });
+    return await res.json();
+  } catch {
+    return { ok: false, error: '雲端同步儲存失敗' };
+  }
+}
+
+export async function apiSaveMemberWorkspacePacks(
+  mid: string,
+  packs: string[]
+): Promise<{ ok: boolean; unlockedPacks?: string[]; error?: string }> {
+  try {
+    const res = await fetch(`/api/member/workspace/${encodeURIComponent(mid)}/packs`, {
+      method: 'POST',
+      headers: buildAuthHeaders({
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      }),
+      credentials: 'include',
+      body: JSON.stringify({ packs }),
+    });
+    return await res.json();
+  } catch {
+    return { ok: false, error: '雲端同步模組設定失敗' };
+  }
+}
+
+export interface ProvisionCloudWorkspaceResponse {
+  ok: boolean;
+  vault?: {
+    folderId: string;
+    folderName: string;
+    folderUrl: string;
+    spreadsheetId: string;
+    spreadsheetName: string;
+    spreadsheetUrl: string;
+  };
+  bootstrap?: ScopedBootstrapPayload;
+  message?: string;
+  needsGasUpgrade?: boolean;
+  error?: string;
+}
+
+export async function apiProvisionMemberCloudWorkspace(
+  mid: string,
+  payload: {
+    tabs?: Array<{ sysType: string; tabName: string; canCreate: boolean; readOnly: boolean }>;
+    rowsBySys?: Record<string, { tabName: string; columns: string[]; rows: Array<Record<string, string>> }>;
+  }
+): Promise<ProvisionCloudWorkspaceResponse> {
+  try {
+    const res = await fetch(`/api/member/workspace/${encodeURIComponent(mid)}/provision-cloud`, {
+      method: 'POST',
+      headers: buildAuthHeaders({
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      }),
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    return (await res.json()) as ProvisionCloudWorkspaceResponse;
+  } catch {
+    return { ok: false, message: '無法連線至雲端試算表建置伺服器，請稍後再試' };
+  }
+}
+
+
 
 

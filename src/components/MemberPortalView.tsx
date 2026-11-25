@@ -57,9 +57,11 @@ import {
   Unlock,
   CreditCard,
   ShieldAlert,
+  Eye,
 } from 'lucide-react';
 import { PersonalTodoBoard } from './PersonalTodoBoard';
 import { ScopedQrCodeCard } from './ScopedQrCodeCard';
+import { MemberCloudSheetViewer } from './MemberCloudSheetViewer';
 import {
   getMemberTodos,
   getOverdueCount,
@@ -81,6 +83,9 @@ import {
   CLOUD_VAULT_UPDATED_EVENT,
   ensureMemberCloudWorkspace,
   getModuleWritePermission,
+  isRealGoogleFolderId,
+  isRealGoogleSheetId,
+  isSafeGoogleCloudUrl,
   MemberCloudWorkspace,
   notifyCloudVaultUpdated,
   renewMemberModuleNow,
@@ -171,6 +176,7 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
       setInlineNotice((prev) => (prev?.text === text ? null : prev));
     }, 4500);
   };
+  const [previewSheetTab, setPreviewSheetTab] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentMid) {
@@ -1080,6 +1086,19 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
           </div>
 
           {/* Member Independent Google Drive Cloud Folder & Google Spreadsheet Card */}
+          {(() => {
+            const hasRealSheet =
+              isRealGoogleSheetId(cloudVault.spreadsheetId) &&
+              isSafeGoogleCloudUrl(cloudVault.spreadsheetUrl);
+            const hasRealFolder =
+              isRealGoogleFolderId(cloudVault.folderId) &&
+              isSafeGoogleCloudUrl(cloudVault.folderUrl);
+            const defaultPreviewSys =
+              cloudVault.sheetTabs.find((t) => t.recordCount > 0)?.sysType ||
+              cloudVault.sheetTabs[0]?.sysType ||
+              'CONTACT_M';
+
+            return (
           <div className="bg-slate-900 border border-indigo-800/60 rounded-xl p-5 space-y-4 shadow-md">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800">
               <div className="flex items-start gap-3">
@@ -1093,14 +1112,14 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                     </h3>
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                        cloudVault.provisionMode === 'LIVE_GAS_DRIVE'
+                        hasRealSheet
                           ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                          : 'bg-indigo-950 text-indigo-300 border-indigo-800'
+                          : 'bg-amber-950 text-amber-300 border-amber-700'
                       }`}
                     >
-                      {cloudVault.provisionMode === 'LIVE_GAS_DRIVE'
-                        ? 'GAS DriveApp 實機已建檔'
-                        : '已自動配發獨立雲端工作區'}
+                      {hasRealSheet
+                        ? '已連結真實 Google 試算表'
+                        : '點擊試算表 ID 即可於系統內預覽'}
                     </span>
                     {expiredCloudModulesCount > 0 && (
                       <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-bold inline-flex items-center gap-1">
@@ -1110,7 +1129,7 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                     )}
                   </div>
                   <p className="text-xs text-slate-400">
-                    入會自動建立專屬雲端資料夾與獨立 Google 試算表；任何 AI 軟體若未續約，對應工作表自動轉為唯讀（<code className="text-amber-300">protect()</code>）：<strong className="text-slate-200">僅能查看歷史舊資料，不可新增資料</strong>。
+                    會員專屬 Google 試算表全程鎖定為<strong className="text-rose-300">「僅供檢視（不可直接修改）」</strong>，點擊下方<strong className="text-emerald-300">試算表 ID</strong> 或任一分頁即可即時查閱；所有新增與維護統一於系統畫面操作，未續約模組亦禁止系統新增。
                   </p>
                 </div>
               </div>
@@ -1122,26 +1141,54 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                 className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${cloudSyncing ? 'animate-spin' : ''}`} />
-                <span>{cloudSyncing ? 'GAS 建檔同步中...' : '立即同步至 GAS Google Drive'}</span>
+                <span>
+                  {cloudSyncing
+                    ? '建立並同步 Google 試算表中...'
+                    : hasRealSheet
+                    ? '同步最新資料至 Google 試算表'
+                    : '一鍵建立真實 Google 試算表並同步'}
+                </span>
               </button>
             </div>
 
             {/* Folder & Spreadsheet Metadata Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="font-bold text-indigo-300 flex items-center gap-1.5">
                     <FolderOpen className="w-4 h-4" />
                     <span>專屬雲端資料夾 (Google Drive Folder)</span>
                   </span>
-                  <span className="font-mono text-[11px] text-slate-400">{cloudVault.folderId}</span>
+                  <span className="font-mono text-[11px] text-slate-400 truncate max-w-[140px]">
+                    {cloudVault.folderId}
+                  </span>
                 </div>
                 <div className="font-semibold text-slate-100 truncate">{cloudVault.folderName}</div>
                 <div className="flex items-center justify-between gap-2 pt-1">
-                  <span className="font-mono text-[11px] text-slate-400 truncate">{cloudVault.folderUrl}</span>
+                  {hasRealFolder ? (
+                    <a
+                      href={cloudVault.folderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>開啟 Google 雲端資料夾</span>
+                    </a>
+                  ) : (
+                    <span className="text-[11px] text-amber-300/90">
+                      本機索引代碼（按右上按鈕可建立真實 Drive 資料夾）
+                    </span>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleCopyVaultValue('folderUrl', cloudVault.folderUrl, '專屬資料夾連結')}
+                    onClick={() =>
+                      handleCopyVaultValue(
+                        'folderUrl',
+                        hasRealFolder ? cloudVault.folderUrl : cloudVault.folderId,
+                        hasRealFolder ? '專屬資料夾連結' : '專屬資料夾索引代碼'
+                      )
+                    }
                     className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer"
                   >
                     {copiedVaultField === 'folderUrl' ? (
@@ -1149,26 +1196,62 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
-                    <span>複製連結</span>
+                    <span>複製</span>
                   </button>
                 </div>
               </div>
 
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
+              <div className="bg-slate-950/80 border border-emerald-800/60 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
                   <span className="font-bold text-emerald-300 flex items-center gap-1.5">
                     <Table className="w-4 h-4" />
                     <span>獨立 Google 試算表 (Spreadsheet)</span>
                   </span>
-                  <span className="font-mono text-[11px] text-slate-400">{cloudVault.spreadsheetId}</span>
-                </div>
-                <div className="font-semibold text-slate-100 truncate">{cloudVault.spreadsheetName}</div>
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <span className="font-mono text-[11px] text-slate-400 truncate">{cloudVault.spreadsheetUrl}</span>
                   <button
                     type="button"
                     onClick={() =>
-                      handleCopyVaultValue('sheetUrl', cloudVault.spreadsheetUrl, '獨立 Google 試算表連結')
+                      setPreviewSheetTab((prev) => (prev ? null : defaultPreviewSys))
+                    }
+                    className="font-mono text-[11px] px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold inline-flex items-center gap-1 cursor-pointer"
+                    title="點擊立即開啟試算表內容預覽"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span className="truncate max-w-[140px]">{cloudVault.spreadsheetId}</span>
+                  </button>
+                </div>
+                <div className="font-semibold text-slate-100 truncate">{cloudVault.spreadsheetName}</div>
+                <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewSheetTab((prev) => (prev ? null : defaultPreviewSys))
+                      }
+                      className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>{previewSheetTab ? '收合試算表內容' : '查看試算表內容'}</span>
+                    </button>
+                    {hasRealSheet && (
+                      <a
+                        href={cloudVault.spreadsheetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-emerald-700 text-emerald-300 text-[11px] font-bold inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>開啟 Google 試算表 (僅供檢視)</span>
+                      </a>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyVaultValue(
+                        'sheetUrl',
+                        hasRealSheet ? cloudVault.spreadsheetUrl : cloudVault.spreadsheetId,
+                        hasRealSheet ? '獨立 Google 試算表連結' : '試算表索引 ID'
+                      )
                     }
                     className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer"
                   >
@@ -1177,11 +1260,23 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
-                    <span>複製連結</span>
+                    <span>複製</span>
                   </button>
                 </div>
               </div>
             </div>
+
+            {previewSheetTab && (
+              <MemberCloudSheetViewer
+                memberMid={currentMid}
+                cloudVault={cloudVault}
+                initialSysType={previewSheetTab}
+                theme="dark"
+                syncing={cloudSyncing}
+                onSyncGoogleSheet={handleSyncCloudVaultToGas}
+                onClose={() => setPreviewSheetTab(null)}
+              />
+            )}
 
             {/* Simulation Tester for Unrenewed Read-Only Mode */}
             <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
@@ -1225,19 +1320,27 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-950 text-slate-400 text-[11px] border-b border-slate-800">
                   <tr>
-                    <th className="py-2 px-3">試算表工作表分頁 (Tab)</th>
+                    <th className="py-2 px-3">試算表工作表分頁 (點擊查看內容)</th>
                     <th className="py-2 px-3">既有舊資料</th>
                     <th className="py-2 px-3">寫入權限管控 (GAS Protect)</th>
                     <th className="py-2 px-3">到期日</th>
-                    <th className="py-2 px-3 text-right">續約解鎖</th>
+                    <th className="py-2 px-3 text-right">檢視 / 續約</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {cloudVault.sheetTabs.map((tab) => (
                     <tr key={tab.sysType} className="hover:bg-slate-800/30">
                       <td className="py-2 px-3">
-                        <div className="font-semibold text-slate-200">{tab.title}</div>
-                        <div className="font-mono text-[10px] text-slate-500">{tab.tabName}</div>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewSheetTab(tab.sysType)}
+                          className="text-left group cursor-pointer"
+                        >
+                          <div className="font-semibold text-slate-200 group-hover:text-emerald-300 group-hover:underline">
+                            {tab.title}
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-500">{tab.tabName}</div>
+                        </button>
                       </td>
                       <td className="py-2 px-3 font-mono text-slate-300">
                         {tab.recordCount} 筆 (可查看)
@@ -1259,18 +1362,26 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                         {tab.expiresAt ? new Date(tab.expiresAt).toLocaleDateString() : '-'}
                       </td>
                       <td className="py-2 px-3 text-right">
-                        {!tab.canCreate ? (
+                        <div className="inline-flex items-center gap-1.5 justify-end">
                           <button
                             type="button"
-                            onClick={() => handleOneClickRenewModule(tab.moduleKey)}
-                            className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            onClick={() => setPreviewSheetTab(tab.sysType)}
+                            className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <CreditCard className="w-3 h-3" />
-                            <span>續約 100 元解鎖</span>
+                            <Eye className="w-3 h-3" />
+                            <span>查看內容</span>
                           </button>
-                        ) : (
-                          <span className="text-[11px] text-emerald-400 font-semibold">正常讀寫中</span>
-                        )}
+                          {!tab.canCreate && (
+                            <button
+                              type="button"
+                              onClick={() => handleOneClickRenewModule(tab.moduleKey)}
+                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <CreditCard className="w-3 h-3" />
+                              <span>續約解鎖</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1278,6 +1389,8 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
               </table>
             </div>
           </div>
+            );
+          })()}
 
           {/* All Owned Nodes Table */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">

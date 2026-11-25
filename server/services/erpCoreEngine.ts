@@ -85,6 +85,9 @@ export class ERPEngine {
   // 4. 第 3 種 AI 系統：個人預約系統
   private bookingProfiles: Map<string, BookingProfile> = new Map();
   private bookingAppointments: Map<string, BookingAppointment> = new Map();
+  // 5. 會員全能五星工作區跨裝置雲端同步資料（解鎖模組 + 各模組建檔紀錄與照片）
+  private memberWorkspacePacks: Map<string, string[]> = new Map();
+  private memberWorkspaceRecords: Map<string, Record<string, Array<Record<string, any>>>> = new Map();
 
   private currentMonolineCounter: number = 0; // 新會員入會從 A-00001 建檔 (0 -> 首位為 1)
   private currentBinaryCounter: number = 25000514; // 開局池至 25000514
@@ -163,6 +166,12 @@ export class ERPEngine {
           this.abanyTechAccumulated = parsed.abanyTechAccumulated || 0;
           this.hqOpsAccumulated = parsed.hqOpsAccumulated || 0;
           this.hqDbAuditLogs = Array.isArray(parsed.hqDbAuditLogs) ? parsed.hqDbAuditLogs.slice(0, 200) : [];
+          if (parsed.memberWorkspacePacks && Array.isArray(parsed.memberWorkspacePacks)) {
+            this.memberWorkspacePacks = new Map(parsed.memberWorkspacePacks);
+          }
+          if (parsed.memberWorkspaceRecords && Array.isArray(parsed.memberWorkspaceRecords)) {
+            this.memberWorkspaceRecords = new Map(parsed.memberWorkspaceRecords);
+          }
 
           if (this.purgeLegacyVirtualDemoData()) {
             this.saveState();
@@ -979,6 +988,8 @@ export class ERPEngine {
         abanyTechAccumulated: this.abanyTechAccumulated,
         hqOpsAccumulated: this.hqOpsAccumulated,
         hqDbAuditLogs: this.hqDbAuditLogs.slice(0, 200),
+        memberWorkspacePacks: Array.from(this.memberWorkspacePacks.entries()),
+        memberWorkspaceRecords: Array.from(this.memberWorkspaceRecords.entries()),
       };
       if (!fs.existsSync(SERVER_DATA_DIR)) {
         fs.mkdirSync(SERVER_DATA_DIR, { recursive: true });
@@ -1631,6 +1642,33 @@ export class ERPEngine {
         contact.updatedAt = new Date().toISOString();
       }
     }
+    this.saveState();
+    return true;
+  }
+
+  /**
+   * 持久化儲存會員真實的 Google Drive 資料夾與 Google 試算表 ID / 連結（跨手機與桌機同步）
+   */
+  public updateMemberCloudVault(
+    mid: string,
+    vault: {
+      folderId?: string;
+      folderName?: string;
+      folderUrl?: string;
+      spreadsheetId?: string;
+      spreadsheetName?: string;
+      spreadsheetUrl?: string;
+    }
+  ): boolean {
+    const normalizedMid = String(mid || '').trim().toUpperCase();
+    const member = this.members.get(normalizedMid);
+    if (!member) return false;
+    if (vault.folderId) member.cloudFolderId = vault.folderId;
+    if (vault.folderName) member.cloudFolderName = vault.folderName;
+    if (vault.folderUrl) member.cloudFolderUrl = vault.folderUrl;
+    if (vault.spreadsheetId) member.cloudSpreadsheetId = vault.spreadsheetId;
+    if (vault.spreadsheetName) member.cloudSpreadsheetName = vault.spreadsheetName;
+    if (vault.spreadsheetUrl) member.cloudSpreadsheetUrl = vault.spreadsheetUrl;
     this.saveState();
     return true;
   }
@@ -2415,6 +2453,10 @@ export class ERPEngine {
     return Array.from(this.contactTrackings.values()).reverse();
   }
 
+  public getContactTrackingById(id: string): ContactTrackingRecord | undefined {
+    return this.contactTrackings.get(id.trim().toUpperCase());
+  }
+
   public addContactTracking(record: {
     name: string;
     contactDate?: string;
@@ -3151,10 +3193,13 @@ export class ERPEngine {
       );
 
       const ownContacts = Array.from(this.contacts.entries()).filter(
-        ([, c]) => !c.ownerMid || c.ownerMid === selfMid
+        ([, c]) => !c.ownerMid || c.ownerMid === selfMid || c.memberMid === selfMid
       );
       const ownTrackings = Array.from(this.contactTrackings.entries()).filter(
-        ([, t]) => !t.memberMid || t.memberMid === selfMid || t.name === selfMember?.name
+        ([, t]) =>
+          !t.ownerMid && !t.memberMid
+            ? true
+            : t.ownerMid === selfMid || t.memberMid === selfMid || t.name === selfMember?.name
       );
 
       return {
@@ -3354,6 +3399,10 @@ export class ERPEngine {
     binaryNodes?: any[];
     contacts?: any[];
     contactTrackings?: any[];
+    events?: any[];
+    eventTrackings?: any[];
+    workspaceRecords?: any[];
+    cloudVaults?: any[];
   }): {
     importedMembers: number;
     importedMonoline: number;
@@ -3729,7 +3778,8 @@ export class ERPEngine {
             String(row?.photoUrl || existing?.photoUrl || '').trim() ||
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
           updatedAt: parseIso(row?.updatedAt),
-          memberMid: existing?.memberMid,
+          memberMid: String(row?.memberMid || '').trim().toUpperCase() || existing?.memberMid,
+          ownerMid: String(row?.ownerMid || '').trim().toUpperCase() || existing?.ownerMid,
           monolineNodeId: existing?.monolineNodeId,
           binaryNodeId: existing?.binaryNodeId,
         };
@@ -3744,7 +3794,7 @@ export class ERPEngine {
             if (!m.email && contact.email) m.email = contact.email;
             if (!m.address && contact.address) m.address = contact.address;
             if (!m.contactId) m.contactId = cid;
-            contact.memberMid = m.mid;
+            if (!contact.memberMid) contact.memberMid = m.mid;
             break;
           }
         }
@@ -3774,7 +3824,8 @@ export class ERPEngine {
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
           updatedAt: parseIso(row?.updatedAt),
           contactId: existing?.contactId,
-          memberMid: existing?.memberMid,
+          memberMid: String(row?.memberMid || '').trim().toUpperCase() || existing?.memberMid,
+          ownerMid: String(row?.ownerMid || '').trim().toUpperCase() || existing?.ownerMid,
         };
         this.contactTrackings.set(tid, rec);
         importedTrackings++;
@@ -3782,6 +3833,109 @@ export class ERPEngine {
         const ctNum = parseInt(tid.replace(/^CT-/, ''), 10);
         if (!isNaN(ctNum) && ctNum > this.currentTrackingCounter) {
           this.currentTrackingCounter = ctNum;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.events)) {
+      for (const row of payload.events) {
+        const eid = String(row?.id || '').trim().toUpperCase();
+        if (!eid) continue;
+        const existing = this.events.get(eid);
+        const ev: EventMasterRecord = {
+          id: eid,
+          status: String(row?.status || existing?.status || '報名中').trim(),
+          eventTheme: String(row?.eventTheme || existing?.eventTheme || eid).trim(),
+          date: String(row?.date || existing?.date || new Date().toISOString().split('T')[0]).trim(),
+          location: String(row?.location || existing?.location || '地區教育中心').trim(),
+          budget: row?.budget !== undefined && row?.budget !== '' ? row.budget : (existing?.budget ?? 0),
+          leader: String(row?.leader || existing?.leader || '').trim(),
+          notes: String(row?.notes ?? existing?.notes ?? '').trim(),
+          photoUrl: String(row?.photoUrl || existing?.photoUrl || '').trim(),
+          updatedAt: parseIso(row?.updatedAt),
+          participantsCount: existing?.participantsCount ?? 0,
+        };
+        this.events.set(eid, ev);
+        const emNum = parseInt(eid.replace(/^EM-/, ''), 10);
+        if (!isNaN(emNum) && emNum > this.currentEventCounter) {
+          this.currentEventCounter = emNum;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.eventTrackings)) {
+      for (const row of payload.eventTrackings) {
+        const etid = String(row?.id || '').trim().toUpperCase();
+        if (!etid) continue;
+        const existing = this.eventTrackings.get(etid);
+        const et: EventTrackingRecord = {
+          id: etid,
+          status: String(row?.status || existing?.status || '公開發布').trim(),
+          eventTheme: String(row?.eventTheme || existing?.eventTheme || '').trim(),
+          photoTitle: String(row?.photoTitle || existing?.photoTitle || etid).trim(),
+          shootLocation: String(row?.shootLocation || existing?.shootLocation || '').trim(),
+          contentNotes: String(row?.contentNotes || existing?.contentNotes || '').trim(),
+          photoUrl: String(row?.photoUrl || existing?.photoUrl || '').trim(),
+          updatedAt: parseIso(row?.updatedAt),
+          eventId: existing?.eventId,
+        };
+        this.eventTrackings.set(etid, et);
+        const etNum = parseInt(etid.replace(/^ET-/, ''), 10);
+        if (!isNaN(etNum) && etNum > this.currentEventTrackingCounter) {
+          this.currentEventTrackingCounter = etNum;
+        }
+      }
+    }
+
+    if (Array.isArray(payload.workspaceRecords)) {
+      for (const entry of payload.workspaceRecords) {
+        const mid = String(entry?.memberMid || '').trim().toUpperCase();
+        const sysType = String(entry?.sysType || '').trim().toUpperCase();
+        if (!mid || !sysType) continue;
+        if (sysType === '_PACKS' && Array.isArray(entry?.packs)) {
+          const cleanPacks = entry.packs
+            .map((p: any) => String(p || '').trim().toUpperCase())
+            .filter(Boolean);
+          if (cleanPacks.length > 0) {
+            this.memberWorkspacePacks.set(mid, Array.from(new Set(cleanPacks)));
+          }
+          continue;
+        }
+        if (entry?.record && typeof entry.record === 'object' && entry.record.ID) {
+          const bySys = this.memberWorkspaceRecords.get(mid) || {};
+          const list = Array.isArray(bySys[sysType]) ? [...bySys[sysType]] : [];
+          const recId = String(entry.record.ID).trim();
+          const idx = list.findIndex((r) => String(r?.ID || '').trim() === recId);
+          if (idx >= 0) {
+            list[idx] = { ...list[idx], ...entry.record };
+          } else {
+            list.unshift(entry.record);
+          }
+          bySys[sysType] = list.slice(0, 500);
+          this.memberWorkspaceRecords.set(mid, bySys);
+        }
+      }
+    }
+
+    if (Array.isArray(payload.cloudVaults)) {
+      for (const v of payload.cloudVaults) {
+        const vMid = String(v?.memberMid || '').trim().toUpperCase();
+        const vSsId = String(v?.spreadsheetId || '').trim();
+        if (!vMid || !vSsId || vSsId.startsWith('GSHEET-')) continue;
+        const member = this.members.get(vMid);
+        if (!member) continue;
+        const vFolderId = String(v?.folderId || '').trim();
+        if (vFolderId && !vFolderId.startsWith('GDRV-')) {
+          member.cloudFolderId = vFolderId;
+        }
+        if (v?.folderName) member.cloudFolderName = String(v.folderName).trim();
+        if (v?.folderUrl && /^https:\/\/(drive|docs)\.google\.com\//i.test(String(v.folderUrl).trim())) {
+          member.cloudFolderUrl = String(v.folderUrl).trim();
+        }
+        member.cloudSpreadsheetId = vSsId;
+        if (v?.spreadsheetName) member.cloudSpreadsheetName = String(v.spreadsheetName).trim();
+        if (v?.spreadsheetUrl && /^https:\/\/docs\.google\.com\//i.test(String(v.spreadsheetUrl).trim())) {
+          member.cloudSpreadsheetUrl = String(v.spreadsheetUrl).trim();
         }
       }
     }
@@ -4248,6 +4402,80 @@ export class ERPEngine {
       parentId: existing.parentId,
       auditEntry,
     };
+  }
+
+  // ============================================================================
+  // 會員全能五星工作區跨裝置雲端同步儲存 (手機 <-> 伺服器 <-> 桌機 + GAS)
+  // ============================================================================
+
+  public getMemberWorkspaceData(mid: string): {
+    unlockedPacks: string[] | null;
+    recordsBySys: Record<string, Array<Record<string, any>>>;
+  } {
+    const keyMid = String(mid || '').trim().toUpperCase();
+    const packs = this.memberWorkspacePacks.get(keyMid) || null;
+    const recordsBySys = this.memberWorkspaceRecords.get(keyMid) || {};
+    return {
+      unlockedPacks: packs ? [...packs] : null,
+      recordsBySys,
+    };
+  }
+
+  public saveMemberWorkspacePacks(mid: string, packs: string[]): string[] {
+    const keyMid = String(mid || '').trim().toUpperCase();
+    const clean = Array.from(
+      new Set(
+        packs
+          .map((p) => String(p || '').trim().toUpperCase())
+          .filter(Boolean)
+      )
+    );
+    if (!clean.includes('CONTACT')) clean.unshift('CONTACT');
+    if (!clean.includes('EVENT')) clean.push('EVENT');
+    this.memberWorkspacePacks.set(keyMid, clean);
+    this.saveState();
+    return clean;
+  }
+
+  public upsertMemberWorkspaceRecord(
+    mid: string,
+    sysType: string,
+    record: Record<string, any>
+  ): Record<string, any> {
+    const keyMid = String(mid || '').trim().toUpperCase();
+    const keySys = String(sysType || '').trim().toUpperCase();
+    const recId = String(record.ID || '').trim();
+    if (!keyMid || !keySys || !recId) {
+      throw new Error('缺少必要識別欄位 (memberMid / sysType / ID)');
+    }
+    const bySys = this.memberWorkspaceRecords.get(keyMid) || {};
+    const list = Array.isArray(bySys[keySys]) ? [...bySys[keySys]] : [];
+    const idx = list.findIndex((r) => String(r?.ID || '').trim() === recId);
+    const saved = { ...record, ID: recId };
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...saved };
+    } else {
+      list.unshift(saved);
+    }
+    bySys[keySys] = list.slice(0, 500);
+    this.memberWorkspaceRecords.set(keyMid, bySys);
+    this.saveState();
+    return saved;
+  }
+
+  public deleteMemberWorkspaceRecord(mid: string, sysType: string, recordId: string): boolean {
+    const keyMid = String(mid || '').trim().toUpperCase();
+    const keySys = String(sysType || '').trim().toUpperCase();
+    const bySys = this.memberWorkspaceRecords.get(keyMid);
+    if (!bySys || !Array.isArray(bySys[keySys])) return false;
+    const before = bySys[keySys].length;
+    bySys[keySys] = bySys[keySys].filter((r) => String(r?.ID || '').trim() !== recordId.trim());
+    if (bySys[keySys].length !== before) {
+      this.memberWorkspaceRecords.set(keyMid, bySys);
+      this.saveState();
+      return true;
+    }
+    return false;
   }
 }
 

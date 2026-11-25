@@ -27,6 +27,7 @@ import {
   forwardErpEventToGas,
   getGasBridgeState,
   pingGasBridge,
+  provisionMemberCloudWorkspaceViaGas,
   sendHqDbMutationToGas,
   setGasHydrationStatus,
   updateGasBridgeConfig,
@@ -77,6 +78,73 @@ function sanitizePublicText(val: unknown, maxLen: number): string {
     .replace(/[\u0000-\u001F\u007F]/g, ' ')
     .trim()
     .slice(0, maxLen);
+}
+
+const ALLOWED_WORKSPACE_PACKS = new Set([
+  'CONTACT',
+  'EVENT',
+  'BOOKING',
+  'TODO',
+  'ATOMY',
+  'ELDER',
+  'PRODUCT',
+  'FRUIT',
+  'GROCERY',
+  'NAIL',
+  'ASSOC',
+  'TCM',
+]);
+
+function sanitizePhotoUrl(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (trimmed.length > 250_000) return '';
+  if (/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed)) {
+    return trimmed.replace(/\s+/g, '');
+  }
+  if (trimmed.length <= 2048) {
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        return trimmed;
+      }
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+function sanitizeWorkspaceRecord(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Record<string, string> = {};
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (entries.length > 40) return null;
+  for (const [k, v] of entries) {
+    if (!k || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    const key = k.slice(0, 64);
+    if (key === '照片連結' || key === 'photoUrl') {
+      out[key] = sanitizePhotoUrl(v);
+      continue;
+    }
+    if (typeof v === 'string') {
+      out[key] = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, 4000);
+    } else if (typeof v === 'number' || typeof v === 'boolean') {
+      out[key] = String(v);
+    }
+  }
+  return out;
+}
+
+function canAccessMemberWorkspace(session: AuthSession, targetMid: string): boolean {
+  const normTarget = targetMid.trim().toUpperCase();
+  if (!normTarget) return false;
+  if (session.role === 'HQ_STAFF') return true;
+  if (session.role === 'MEMBER') {
+    return session.userId.trim().toUpperCase() === normTarget;
+  }
+  return false;
 }
 
 async function hydrateEngineFromGas(trigger: 'startup' | 'manual'): Promise<GasHydrationStatus> {
@@ -650,8 +718,8 @@ async function startServer() {
     }
   });
 
-  // 5. Server-Authoritative ERP Action Sync (Strict RBAC enforced)
-  app.post('/api/erp/sync-action', requireAuth, (req: AuthedRequest, res) => {
+  // 5. Server-Authoritative ERP Action Sync (Strict RBAC + Origin/Header CSRF Guard enforced)
+  app.post('/api/erp/sync-action', requireAuth, verifyHqMutationOrigin, (req: AuthedRequest, res) => {
     const session = req.erpSession!;
     const { action, payload } = (req.body || {}) as {
       action?: string;
@@ -770,41 +838,88 @@ async function startServer() {
           break;
         }
         case 'addContact': {
+          const safePhoto = sanitizePhotoUrl(data.photoUrl);
           result = serverErpEngine.addContact({
             ...data,
+            photoUrl: safePhoto,
             ownerMid: session.role === 'MEMBER' ? session.userId : data.ownerMid,
           } as any);
           break;
         }
         case 'updateContact': {
-          result = serverErpEngine.updateContact(data.contactId, data.updates || {});
+          const contactId = String(data.contactId || '').trim().toUpperCase();
+          const existingContact = serverErpEngine.getContactById(contactId);
+          if (
+            session.role === 'MEMBER' &&
+            existingContact &&
+            existingContact.ownerMid &&
+            existingContact.ownerMid !== session.userId &&
+            existingContact.memberMid !== session.userId
+          ) {
+            res.status(403).json({ ok: false, error: '無權修改其他會員的通訊錄資料' });
+            return;
+          }
+          const safeUpdates = { ...(data.updates || {}) };
+          if ('photoUrl' in safeUpdates) {
+            safeUpdates.photoUrl = sanitizePhotoUrl(safeUpdates.photoUrl);
+          }
+          result = serverErpEngine.updateContact(contactId, safeUpdates);
           break;
         }
         case 'addContactTracking': {
+          const safePhoto = sanitizePhotoUrl(data.photoUrl);
           result = serverErpEngine.addContactTracking({
             ...data,
+            photoUrl: safePhoto,
+            ownerMid: session.role === 'MEMBER' ? session.userId : (data.ownerMid || data.memberMid),
             memberMid: session.role === 'MEMBER' ? session.userId : data.memberMid,
           } as any);
           break;
         }
         case 'updateContactTracking': {
-          result = serverErpEngine.updateContactTracking(data.trackingId, data.updates || {});
+          const trackingId = String(data.trackingId || '').trim().toUpperCase();
+          const existingTracking = serverErpEngine.getContactTrackingById(trackingId);
+          if (
+            session.role === 'MEMBER' &&
+            existingTracking &&
+            existingTracking.ownerMid &&
+            existingTracking.ownerMid !== session.userId &&
+            existingTracking.memberMid !== session.userId
+          ) {
+            res.status(403).json({ ok: false, error: '無權修改其他會員的聯繫紀錄' });
+            return;
+          }
+          const safeUpdates = { ...(data.updates || {}) };
+          if ('photoUrl' in safeUpdates) {
+            safeUpdates.photoUrl = sanitizePhotoUrl(safeUpdates.photoUrl);
+          }
+          result = serverErpEngine.updateContactTracking(trackingId, safeUpdates);
           break;
         }
         case 'addEvent': {
-          result = serverErpEngine.addEvent(data as any);
+          const safePhoto = sanitizePhotoUrl(data.photoUrl);
+          result = serverErpEngine.addEvent({ ...data, photoUrl: safePhoto } as any);
           break;
         }
         case 'updateEvent': {
-          result = serverErpEngine.updateEvent(data.eventId, data.updates || {});
+          const safeUpdates = { ...(data.updates || {}) };
+          if ('photoUrl' in safeUpdates) {
+            safeUpdates.photoUrl = sanitizePhotoUrl(safeUpdates.photoUrl);
+          }
+          result = serverErpEngine.updateEvent(data.eventId, safeUpdates);
           break;
         }
         case 'addEventTracking': {
-          result = serverErpEngine.addEventTracking(data as any);
+          const safePhoto = sanitizePhotoUrl(data.photoUrl);
+          result = serverErpEngine.addEventTracking({ ...data, photoUrl: safePhoto } as any);
           break;
         }
         case 'updateEventTracking': {
-          result = serverErpEngine.updateEventTracking(data.trackingId, data.updates || {});
+          const safeUpdates = { ...(data.updates || {}) };
+          if ('photoUrl' in safeUpdates) {
+            safeUpdates.photoUrl = sanitizePhotoUrl(safeUpdates.photoUrl);
+          }
+          result = serverErpEngine.updateEventTracking(data.trackingId, safeUpdates);
           break;
         }
         case 'registerNewStore': {
@@ -912,6 +1027,26 @@ async function startServer() {
           softwareTitle: data.softwareTitle || result.binaryNode.softwareTitle || 'AI 雙軌模組',
           executeSettlement: Boolean(data.executeSettlement),
         });
+      } else if ((action === 'addContact' || action === 'updateContact') && result) {
+        void forwardErpEventToGas('upsertCrmRecord', {
+          sysType: 'CONTACT_M',
+          record: result,
+        });
+      } else if ((action === 'addContactTracking' || action === 'updateContactTracking') && result) {
+        void forwardErpEventToGas('upsertCrmRecord', {
+          sysType: 'CONTACT_T',
+          record: result,
+        });
+      } else if ((action === 'addEvent' || action === 'updateEvent') && result) {
+        void forwardErpEventToGas('upsertCrmRecord', {
+          sysType: 'EVENT_M',
+          record: result,
+        });
+      } else if ((action === 'addEventTracking' || action === 'updateEventTracking') && result) {
+        void forwardErpEventToGas('upsertCrmRecord', {
+          sysType: 'EVENT_T',
+          record: result,
+        });
       }
 
       const bootstrap = serverErpEngine.getScopedBootstrap(session);
@@ -920,6 +1055,192 @@ async function startServer() {
       res.status(400).json({ ok: false, error: err?.message || '操作執行失敗' });
     }
   });
+
+  // 8. Member Five-Star Workspace Cross-Device Cloud Sync Routes (Phone <-> Server <-> Desktop + Google Sheets)
+  app.get('/api/member/workspace/:mid', requireAuth, (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
+    if (!canAccessMemberWorkspace(session, targetMid)) {
+      res.status(403).json({ ok: false, error: '權限不足：僅能讀取本人專屬工作區資料' });
+      return;
+    }
+    const workspace = serverErpEngine.getMemberWorkspaceData(targetMid);
+    const bootstrap = serverErpEngine.getScopedBootstrap(session);
+    res.json({
+      ok: true,
+      mid: targetMid,
+      unlockedPacks: workspace.unlockedPacks,
+      recordsBySys: workspace.recordsBySys,
+      bootstrap,
+      syncedAt: new Date().toISOString(),
+    });
+  });
+
+  app.post('/api/member/workspace/:mid/record', requireAuth, verifyHqMutationOrigin, (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
+    if (!canAccessMemberWorkspace(session, targetMid)) {
+      res.status(403).json({ ok: false, error: '權限不足：僅能寫入本人專屬工作區資料' });
+      return;
+    }
+    const body = (req.body || {}) as Record<string, unknown>;
+    const sysType = sanitizePublicText(body.sysType, 24).toUpperCase();
+    if (!/^[A-Z0-9_]{2,24}$/.test(sysType)) {
+      res.status(400).json({ ok: false, error: '無效的模組代碼 (sysType)' });
+      return;
+    }
+    const safeRecord = sanitizeWorkspaceRecord(body.record);
+    if (!safeRecord || !safeRecord.ID) {
+      res.status(400).json({ ok: false, error: '資料格式錯誤或缺少必要欄位 ID' });
+      return;
+    }
+    try {
+      const saved = serverErpEngine.upsertMemberWorkspaceRecord(targetMid, sysType, safeRecord);
+      void forwardErpEventToGas('upsertWorkspaceRecord', {
+        memberMid: targetMid,
+        sysType,
+        record: saved,
+      });
+      res.json({ ok: true, sysType, record: saved, syncedAt: new Date().toISOString() });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err?.message || '儲存工作區資料失敗' });
+    }
+  });
+
+  app.post('/api/member/workspace/:mid/packs', requireAuth, verifyHqMutationOrigin, (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
+    if (!canAccessMemberWorkspace(session, targetMid)) {
+      res.status(403).json({ ok: false, error: '權限不足：僅能更新本人已開通模組清單' });
+      return;
+    }
+    const body = (req.body || {}) as Record<string, unknown>;
+    if (!Array.isArray(body.packs)) {
+      res.status(400).json({ ok: false, error: 'packs 必須為陣列格式' });
+      return;
+    }
+    const validPacks = body.packs
+      .map((p) => String(p || '').trim().toUpperCase())
+      .filter((p) => ALLOWED_WORKSPACE_PACKS.has(p));
+    const savedPacks = serverErpEngine.saveMemberWorkspacePacks(targetMid, validPacks);
+    void forwardErpEventToGas('saveMemberPacks', {
+      memberMid: targetMid,
+      packs: savedPacks,
+    });
+    res.json({ ok: true, unlockedPacks: savedPacks, syncedAt: new Date().toISOString() });
+  });
+
+  app.post(
+    '/api/member/workspace/:mid/provision-cloud',
+    requireAuth,
+    verifyHqMutationOrigin,
+    async (req: AuthedRequest, res) => {
+      const session = req.erpSession!;
+      const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
+      if (!canAccessMemberWorkspace(session, targetMid)) {
+        res.status(403).json({ ok: false, error: '權限不足：僅能建立或同步本人專屬 Google 試算表' });
+        return;
+      }
+
+      const member = serverErpEngine.getMemberById(targetMid);
+      if (!member) {
+        res.status(404).json({ ok: false, error: `查無會員資料 (${targetMid})` });
+        return;
+      }
+
+      const body = (req.body || {}) as Record<string, unknown>;
+      const rawTabs = Array.isArray(body.tabs) ? body.tabs.slice(0, 40) : [];
+      const safeTabs = rawTabs
+        .map((t: any) => ({
+          sysType: sanitizePublicText(t?.sysType, 24).toUpperCase(),
+          tabName: sanitizePublicText(t?.tabName, 90),
+          canCreate: Boolean(t?.canCreate),
+          readOnly: Boolean(t?.readOnly),
+        }))
+        .filter((t) => t.sysType && t.tabName);
+
+      const safeRowsBySys: Record<
+        string,
+        { tabName: string; columns: string[]; rows: Array<Record<string, string>> }
+      > = {};
+      if (body.rowsBySys && typeof body.rowsBySys === 'object' && !Array.isArray(body.rowsBySys)) {
+        const entries = Object.entries(body.rowsBySys as Record<string, any>).slice(0, 40);
+        for (const [sysKey, tabObj] of entries) {
+          const cleanSys = sanitizePublicText(sysKey, 24).toUpperCase();
+          if (!cleanSys || !tabObj || typeof tabObj !== 'object') continue;
+          const tabName = sanitizePublicText(tabObj.tabName, 90);
+          const columns = Array.isArray(tabObj.columns)
+            ? tabObj.columns
+                .slice(0, 25)
+                .map((c: unknown) => sanitizePublicText(c, 60))
+                .filter(Boolean)
+            : [];
+          if (!tabName || columns.length === 0) continue;
+          const rawRows = Array.isArray(tabObj.rows) ? tabObj.rows.slice(0, 200) : [];
+          const rows = rawRows.map((rowObj: any) => {
+            const out: Record<string, string> = {};
+            for (const col of columns) {
+              const rawVal = rowObj && typeof rowObj === 'object' ? rowObj[col] : '';
+              const str = rawVal === undefined || rawVal === null ? '' : String(rawVal);
+              out[col] = str.startsWith('data:image/')
+                ? '[系統相簿照片]'
+                : str.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, 1500);
+            }
+            return out;
+          });
+          safeRowsBySys[cleanSys] = { tabName, columns, rows };
+        }
+      }
+
+      try {
+        const result = await provisionMemberCloudWorkspaceViaGas({
+          memberMid: targetMid,
+          memberName: member.name || targetMid,
+          tabs: safeTabs,
+          rowsBySys: Object.keys(safeRowsBySys).length > 0 ? safeRowsBySys : undefined,
+        });
+
+        if (!result.ok || !result.spreadsheetId || !result.spreadsheetUrl) {
+          res.json({
+            ok: false,
+            needsGasUpgrade: Boolean(result.needsGasUpgrade),
+            message: result.message || '尚未能建立外部 Google 試算表，您仍可先於系統內即時預覽與匯出 CSV。',
+          });
+          return;
+        }
+
+        serverErpEngine.updateMemberCloudVault(targetMid, {
+          folderId: result.folderId,
+          folderName: result.folderName,
+          folderUrl: result.folderUrl,
+          spreadsheetId: result.spreadsheetId,
+          spreadsheetName: result.spreadsheetName,
+          spreadsheetUrl: result.spreadsheetUrl,
+        });
+
+        const bootstrap = serverErpEngine.getScopedBootstrap(session);
+        res.json({
+          ok: true,
+          vault: {
+            folderId: result.folderId || '',
+            folderName: result.folderName || '',
+            folderUrl: result.folderUrl || '',
+            spreadsheetId: result.spreadsheetId,
+            spreadsheetName: result.spreadsheetName || '',
+            spreadsheetUrl: result.spreadsheetUrl,
+          },
+          bootstrap,
+          message: result.message,
+          syncedAt: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        res.status(500).json({
+          ok: false,
+          message: err?.message || '建立專屬 Google 試算表時發生例外錯誤',
+        });
+      }
+    }
+  );
 
   // Mount static dist/ in production when built, otherwise mount Vite middleware (prevents 404 if dist/ is missing)
   const distDir = path.resolve(process.cwd(), 'dist');

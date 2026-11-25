@@ -3,9 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { erpEngine } from '../services/erpEngine';
 import { HorizontalScrollStrip } from './HorizontalScrollStrip';
+import {
+  apiFetchMemberWorkspace,
+  apiSaveMemberWorkspacePacks,
+  apiSaveMemberWorkspaceRecord,
+} from '../services/confidentialApiClient';
 import {
   SYS_CONFIG,
   INDUSTRY_PACKS,
@@ -29,10 +34,14 @@ import {
   CLOUD_VAULT_UPDATED_EVENT,
   ensureMemberCloudWorkspace,
   getModuleWritePermission,
+  isRealGoogleFolderId,
+  isRealGoogleSheetId,
+  isSafeGoogleCloudUrl,
   renewMemberModuleNow,
   setModuleExpiryStateForTest,
   syncMemberCloudWorkspaceWithGas,
 } from '../services/memberCloudVaultService';
+import { MemberCloudSheetViewer } from './MemberCloudSheetViewer';
 import {
   FONT_FAMILY_OPTIONS,
   FONT_SIZE_OPTIONS,
@@ -101,6 +110,8 @@ import {
   CreditCard,
   RefreshCw,
   Copy,
+  ExternalLink,
+  Eye,
 } from 'lucide-react';
 import { SoftwareOrderSystemView } from './SoftwareOrderSystemView';
 import { PersonalTodoBoard } from './PersonalTodoBoard';
@@ -232,23 +243,34 @@ function compressImageFile(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => resolve(dataUrl);
       img.onload = () => {
-        const maxWidth = 1000;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+        const steps = [
+          { maxWidth: 720, quality: 0.68 },
+          { maxWidth: 560, quality: 0.58 },
+          { maxWidth: 440, quality: 0.48 },
+        ];
+        let best = '';
+        for (const step of steps) {
+          let width = img.width;
+          let height = img.height;
+          if (width > step.maxWidth) {
+            height = Math.round((height * step.maxWidth) / width);
+            width = step.maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(dataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          best = canvas.toDataURL('image/jpeg', step.quality);
+          if (best.length <= 44_000) {
+            break;
+          }
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(dataUrl);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.65));
+        resolve(best || dataUrl);
       };
       img.src = dataUrl;
     };
@@ -266,12 +288,24 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 }) => {
   const [refreshTick, setRefreshTick] = useState(0);
   const triggerRefresh = () => setRefreshTick((t) => t + 1);
+  const [workspaceCloudSyncing, setWorkspaceCloudSyncing] = useState(false);
+  const lastCloudPullAtRef = useRef<number>(0);
 
   // Unlocked Industry Packs per member
   const [unlockedPacks, setUnlockedPacks] = useState<string[]>(() =>
     getMemberUnlockedPacks(memberMid)
   );
   const [packModalOpen, setPackModalOpen] = useState(false);
+  const [cloudSheetPreviewTab, setCloudSheetPreviewTab] = useState<string | null>(null);
+
+  const persistUnlockedPacks = useCallback(
+    (nextPacks: string[]) => {
+      setUnlockedPacks(nextPacks);
+      saveMemberUnlockedPacks(memberMid, nextPacks);
+      void apiSaveMemberWorkspacePacks(memberMid, nextPacks);
+    },
+    [memberMid]
+  );
 
   // Navigation & View States
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -316,6 +350,106 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       window.removeEventListener(CLOUD_VAULT_UPDATED_EVENT, onCloudUpdated);
     };
   }, [memberMid]);
+
+  // Cross-device cloud sync: pull latest server records + photos + CRM/Events and auto-upload any legacy local-only records
+  const syncWorkspaceFromCloud = useCallback(
+    async (manual = false) => {
+      const now = Date.now();
+      if (!manual && now - lastCloudPullAtRef.current < 8000) return;
+      lastCloudPullAtRef.current = now;
+      setWorkspaceCloudSyncing(true);
+      try {
+        const res = await apiFetchMemberWorkspace(memberMid);
+        if (!res.ok) {
+          if (manual) {
+            setToastMsg(res.error || '目前無法連線雲端同步伺服器');
+            window.setTimeout(() => setToastMsg(null), 3200);
+          }
+          return;
+        }
+
+        if (res.bootstrap) {
+          erpEngine.hydrateFromServer(res.bootstrap);
+        }
+
+        const localPacks = getMemberUnlockedPacks(memberMid);
+        const serverPacks = Array.isArray(res.unlockedPacks) ? res.unlockedPacks : null;
+        const mergedPacks = Array.from(new Set([...(serverPacks || []), ...localPacks]));
+        if (mergedPacks.length > 0) {
+          setUnlockedPacks(mergedPacks);
+          saveMemberUnlockedPacks(memberMid, mergedPacks);
+          if (!serverPacks || mergedPacks.length > serverPacks.length) {
+            void apiSaveMemberWorkspacePacks(memberMid, mergedPacks);
+          }
+        }
+
+        const serverBySys = res.recordsBySys || {};
+        const dynamicSysKeys = Object.keys(SYS_CONFIG).filter(
+          (k) => !['CONTACT_M', 'CONTACT_T', 'EVENT_M', 'EVENT_T', 'BOOKING_T'].includes(k)
+        );
+        const allSysKeys = Array.from(new Set([...dynamicSysKeys, ...Object.keys(serverBySys)]));
+        const seedIdPattern = /^[A-Z]{2,3}-00[1-3]$/;
+
+        for (const sysKey of allSysKeys) {
+          const remoteList = Array.isArray(serverBySys[sysKey]) ? serverBySys[sysKey] : [];
+          const localList = loadMemberDynamicRecords(memberMid, sysKey);
+          const mergedMap = new Map<string, DynamicRecord>();
+
+          // Put local records first, then overlay authoritative server records
+          for (const rec of localList) {
+            if (rec?.ID) mergedMap.set(String(rec.ID).trim(), rec);
+          }
+          const remoteIds = new Set<string>();
+          for (const rec of remoteList) {
+            if (rec?.ID) {
+              const id = String(rec.ID).trim();
+              remoteIds.add(id);
+              mergedMap.set(id, { ...(mergedMap.get(id) || {}), ...rec });
+            }
+          }
+
+          // Auto-upload any user-created or photo-bearing local records not yet on server (migrates existing phone data)
+          for (const rec of localList) {
+            const id = String(rec?.ID || '').trim();
+            if (!id || remoteIds.has(id)) continue;
+            const isUserCreatedOrEdited =
+              !seedIdPattern.test(id) || Boolean(rec['照片連結'] && String(rec['照片連結']).trim());
+            if (isUserCreatedOrEdited) {
+              void apiSaveMemberWorkspaceRecord(memberMid, sysKey, rec);
+            }
+          }
+
+          if (remoteList.length > 0) {
+            saveMemberDynamicRecords(memberMid, sysKey, Array.from(mergedMap.values()));
+          }
+        }
+
+        setRefreshTick((t) => t + 1);
+        if (manual) {
+          setToastMsg('已完成跨裝置雲端同步！手機與桌機建檔資料與照片已保持一致。');
+          window.setTimeout(() => setToastMsg(null), 3200);
+        }
+      } finally {
+        setWorkspaceCloudSyncing(false);
+      }
+    },
+    [memberMid]
+  );
+
+  useEffect(() => {
+    void syncWorkspaceFromCloud(false);
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncWorkspaceFromCloud(false);
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    return () => {
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+    };
+  }, [syncWorkspaceFromCloud]);
 
   const updateWorkspaceFont = (next: Partial<FontPreferences>) => {
     const merged: FontPreferences = {
@@ -825,8 +959,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     const next = exists
       ? unlockedPacks.filter((k) => k !== baseKey)
       : [...unlockedPacks, baseKey];
-    setUnlockedPacks(next);
-    saveMemberUnlockedPacks(memberMid, next);
+    persistUnlockedPacks(next);
 
     if (!exists) {
       const packMeta = INDUSTRY_PACKS.find((p) => p.baseKey === baseKey);
@@ -1029,8 +1162,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     // Ensure pack is unlocked & switch to _T view
     if (!unlockedPacks.includes(conf.baseKey)) {
       const next = [...unlockedPacks, conf.baseKey];
-      setUnlockedPacks(next);
-      saveMemberUnlockedPacks(memberMid, next);
+      persistUnlockedPacks(next);
     }
 
     setActiveSys(tKey as ActiveSysKey);
@@ -1175,12 +1307,13 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       }
     }
 
-    // Dynamic LocalStorage Modules scoped per memberMid
+    // Dynamic Modules scoped per memberMid (localStorage cache + real-time server & Google Sheets cloud sync)
     const list = loadMemberDynamicRecords(memberMid, sysType);
     if (mode === 'edit' && existingId) {
       const savedRec = { ...values, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
       const updated = list.map((r) => (r.ID === existingId ? { ...r, ...savedRec } : r));
       saveMemberDynamicRecords(memberMid, sysType, updated);
+      void apiSaveMemberWorkspaceRecord(memberMid, sysType, savedRec);
       if (sysType === 'TODO_T') {
         void syncMemberTodosToGas(memberMid, 'upsertTodo', { todo: savedRec });
         notifyTodosUpdated(memberMid);
@@ -1196,6 +1329,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         更新時間: nowStr,
       };
       saveMemberDynamicRecords(memberMid, sysType, [newRec, ...list]);
+      void apiSaveMemberWorkspaceRecord(memberMid, sysType, newRec);
       if (sysType === 'TODO_T') {
         void syncMemberTodosToGas(memberMid, 'upsertTodo', { todo: newRec });
         notifyTodosUpdated(memberMid);
@@ -1250,8 +1384,8 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
     showToast(
       drawerMode === 'edit'
-        ? `已成功更新 ${saved.ID}！`
-        : `已成功新增 ${conf.name} (${saved.ID})！`
+        ? `已更新 ${saved.ID} 並即時同步雲端（手機與桌機互通）！`
+        : `已新增 ${conf.name} (${saved.ID}) 並即時同步雲端！`
     );
     triggerRefresh();
 
@@ -1616,8 +1750,18 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           </div>
         </div>
 
-        {/* Right: Multi-select Share + Mobile Search + Red Plus Add */}
+        {/* Right: Cloud Sync + Multi-select Share + Mobile Search + Red Plus Add */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => void syncWorkspaceFromCloud(true)}
+            disabled={workspaceCloudSyncing}
+            title="立即同步手機與桌機雲端建檔資料與照片"
+            className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-[#065fd4] flex items-center justify-center transition-all cursor-pointer shadow-xs disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${workspaceCloudSyncing ? 'animate-spin' : ''}`} />
+          </button>
+
           <button
             type="button"
             onClick={handleToggleShareMode}
@@ -1781,8 +1925,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
               onClick={() => {
                 if (!unlockedPacks.includes('TODO')) {
                   const next = [...unlockedPacks, 'TODO'];
-                  setUnlockedPacks(next);
-                  saveMemberUnlockedPacks(memberMid, next);
+                  persistUnlockedPacks(next);
                   syncMemberPurchasedProductsToNodes(memberMid);
                   notifyNodesUpdated(memberMid);
                   onNodesChanged?.();
@@ -2219,8 +2362,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                         onClick={() => {
                           if (!unlockedPacks.includes('TODO')) {
                             const next = [...unlockedPacks, 'TODO'];
-                            setUnlockedPacks(next);
-                            saveMemberUnlockedPacks(memberMid, next);
+                            persistUnlockedPacks(next);
                           }
                           handleSwitchSys('TODO_BOARD');
                         }}
@@ -3358,8 +3500,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                   type="button"
                   onClick={() => {
                     const allKeys = INDUSTRY_PACKS.map((p) => p.baseKey);
-                    setUnlockedPacks(allKeys);
-                    saveMemberUnlockedPacks(memberMid, allKeys);
+                    persistUnlockedPacks(allKeys);
                     triggerRefresh();
                     showToast('已全部開通 10 大產業雙軌模組（共 20 個子系統）！');
                   }}
@@ -3391,182 +3532,315 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       )}
 
       {/* ================= MEMBER CLOUD FOLDER & GOOGLE SPREADSHEET VAULT MODAL ================= */}
-      {cloudModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[88vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden text-slate-900">
+      {cloudModalOpen && (() => {
+        const hasRealSheet =
+          isRealGoogleSheetId(cloudVault.spreadsheetId) &&
+          isSafeGoogleCloudUrl(cloudVault.spreadsheetUrl);
+        const hasRealFolder =
+          isRealGoogleFolderId(cloudVault.folderId) &&
+          isSafeGoogleCloudUrl(cloudVault.folderUrl);
+        const defaultPreviewSys =
+          cloudVault.sheetTabs.find((t) => t.recordCount > 0)?.sysType ||
+          cloudVault.sheetTabs[0]?.sysType ||
+          'CONTACT_M';
+
+        return (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-center justify-center p-3 sm:p-4">
+          <div
+            className={`bg-white rounded-2xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden text-slate-900 transition-all ${
+              cloudSheetPreviewTab ? 'max-w-5xl' : 'max-w-3xl'
+            }`}
+          >
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
               <div>
-                <h4 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                <h4 className="font-bold text-base text-slate-900 flex items-center gap-2 flex-wrap">
                   <FolderOpen className="w-5 h-5 text-[#065fd4]" />
                   <span>會員專屬雲端資料夾 & 獨立 Google 試算表 ({memberMid})</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                      hasRealSheet
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                        : 'bg-amber-50 text-amber-800 border-amber-300'
+                    }`}
+                  >
+                    {hasRealSheet ? '已連結真實 Google 試算表' : '點擊試算表 ID 即可預覽內容'}
+                  </span>
                 </h4>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  未續約之 AI 軟體自動開啟試算表工作表唯讀鎖定：只能查看舊資料，不能新增資料；續約 NT$ 100 即刻恢復新增。
+                  會員專屬 Google 試算表全程鎖定為「僅供檢視」，無法直接在試算表修改或刪除資料（所有建檔異動統一透過系統介面自動寫入）；未續約模組則系統與試算表皆禁止新增。
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setCloudModalOpen(false)}
+                onClick={() => {
+                  setCloudSheetPreviewTab(null);
+                  setCloudModalOpen(false);
+                }}
                 className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5">
-                  <div className="flex items-center justify-between text-indigo-700 font-bold">
-                    <span className="flex items-center gap-1">
-                      <FolderOpen className="w-4 h-4" />
-                      <span>Google Drive 雲端資料夾</span>
-                    </span>
-                    <span className="font-mono text-[11px] text-slate-500">{cloudVault.folderId}</span>
-                  </div>
-                  <div className="font-semibold text-slate-900 truncate">{cloudVault.folderName}</div>
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <span className="font-mono text-[11px] text-slate-500 truncate">{cloudVault.folderUrl}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(cloudVault.folderUrl);
-                        showToast('已複製會員專屬 Google Drive 資料夾連結！');
-                      }}
-                      className="px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 cursor-pointer"
-                    >
-                      <Copy className="w-3 h-3" />
-                      <span>複製</span>
-                    </button>
-                  </div>
-                </div>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+              {cloudSheetPreviewTab ? (
+                <MemberCloudSheetViewer
+                  memberMid={memberMid}
+                  cloudVault={cloudVault}
+                  initialSysType={cloudSheetPreviewTab}
+                  theme="light"
+                  syncing={cloudSyncing}
+                  onSyncGoogleSheet={async () => {
+                    setCloudSyncing(true);
+                    const res = await syncMemberCloudWorkspaceWithGas(memberMid);
+                    triggerRefresh();
+                    setCloudSyncing(false);
+                    showToast(res.message);
+                  }}
+                  onClose={() => setCloudSheetPreviewTab(null)}
+                  onOpenModule={(sysType) => {
+                    setCloudSheetPreviewTab(null);
+                    setCloudModalOpen(false);
+                    if (sysType === 'BOOKING_T') {
+                      handleSwitchSys('BOOKING');
+                    } else if (sysType === 'TODO_T') {
+                      handleSwitchSys('TODO_BOARD');
+                    } else if (sysType in SYS_CONFIG) {
+                      handleSwitchSys(sysType as ActiveSysKey);
+                    }
+                  }}
+                />
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-indigo-700 font-bold">
+                        <span className="flex items-center gap-1">
+                          <FolderOpen className="w-4 h-4" />
+                          <span>Google Drive 雲端資料夾</span>
+                        </span>
+                        <span className="font-mono text-[11px] text-slate-500 truncate max-w-[140px]">
+                          {cloudVault.folderId}
+                        </span>
+                      </div>
+                      <div className="font-semibold text-slate-900 truncate">{cloudVault.folderName}</div>
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        {hasRealFolder ? (
+                          <a
+                            href={cloudVault.folderUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>開啟 Google 雲端資料夾</span>
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-amber-700">
+                            系統索引編號（按下方同步即可產生實體 Drive 資料夾）
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(
+                              hasRealFolder ? cloudVault.folderUrl : cloudVault.folderId
+                            );
+                            showToast(
+                              hasRealFolder
+                                ? '已複製會員專屬 Google Drive 資料夾連結！'
+                                : '已複製雲端資料夾索引代碼！'
+                            );
+                          }}
+                          className="px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>複製</span>
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-1.5">
-                  <div className="flex items-center justify-between text-emerald-700 font-bold">
-                    <span className="flex items-center gap-1">
-                      <Table className="w-4 h-4" />
-                      <span>獨立 Google 試算表</span>
-                    </span>
-                    <span className="font-mono text-[11px] text-slate-500">{cloudVault.spreadsheetId}</span>
-                  </div>
-                  <div className="font-semibold text-slate-900 truncate">{cloudVault.spreadsheetName}</div>
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <span className="font-mono text-[11px] text-slate-500 truncate">{cloudVault.spreadsheetUrl}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(cloudVault.spreadsheetUrl);
-                        showToast('已複製會員專屬 Google 試算表連結！');
-                      }}
-                      className="px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 cursor-pointer"
-                    >
-                      <Copy className="w-3 h-3" />
-                      <span>複製</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Expiry Simulation Controls */}
-              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-amber-950">測試未續約唯讀鎖定：</span>
-                  <select
-                    value={vaultTestModuleKey}
-                    onChange={(e) => setVaultTestModuleKey(e.target.value)}
-                    className="bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 cursor-pointer"
-                  >
-                    {ORDERABLE_SOFTWARE_CATALOG.map((c) => (
-                      <option key={c.key} value={c.key}>
-                        {c.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const perm = setModuleExpiryStateForTest(memberMid, vaultTestModuleKey, true);
-                      triggerRefresh();
-                      onNodesChanged?.();
-                      showToast(`已模擬「${perm.softwareTitle}」未續約到期：僅能查看舊資料，禁止新增！`);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Lock className="w-3 h-3" />
-                    <span>模擬到期(唯讀)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const perm = setModuleExpiryStateForTest(memberMid, vaultTestModuleKey, false);
-                      triggerRefresh();
-                      onNodesChanged?.();
-                      showToast(`已恢復「${perm.softwareTitle}」有效授權，解除唯讀！`);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Unlock className="w-3 h-3" />
-                    <span>恢復讀寫</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                    <tr>
-                      <th className="py-2 px-3">工作表分頁 (Tab)</th>
-                      <th className="py-2 px-3">舊資料筆數</th>
-                      <th className="py-2 px-3">狀態</th>
-                      <th className="py-2 px-3 text-right">續約解鎖</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {cloudVault.sheetTabs.map((tab) => (
-                      <tr key={tab.sysType}>
-                        <td className="py-2 px-3">
-                          <div className="font-semibold text-slate-900">{tab.title}</div>
-                          <div className="font-mono text-[10px] text-slate-400">{tab.tabName}</div>
-                        </td>
-                        <td className="py-2 px-3 font-mono text-slate-700">{tab.recordCount} 筆</td>
-                        <td className="py-2 px-3">
-                          {tab.canCreate ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-                              <Unlock className="w-3 h-3" />
-                              <span>{tab.statusLabel}</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-100 text-rose-800 text-[11px] font-bold">
-                              <Lock className="w-3 h-3" />
-                              <span>{tab.statusLabel}</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-3 text-right">
-                          {!tab.canCreate ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const res = renewMemberModuleNow(memberMid, tab.moduleKey);
-                                triggerRefresh();
-                                onNodesChanged?.();
-                                showToast(res.message);
-                              }}
-                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                    <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-emerald-800 font-bold">
+                        <span className="flex items-center gap-1">
+                          <Table className="w-4 h-4" />
+                          <span>獨立 Google 試算表</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCloudSheetPreviewTab(defaultPreviewSys)}
+                          className="font-mono text-[11px] px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1 cursor-pointer shadow-xs"
+                          title="點擊立即開啟試算表內容"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span className="truncate max-w-[130px]">{cloudVault.spreadsheetId}</span>
+                        </button>
+                      </div>
+                      <div className="font-semibold text-slate-900 truncate">
+                        {cloudVault.spreadsheetName}
+                      </div>
+                      <div className="flex items-center justify-between gap-1.5 pt-1 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setCloudSheetPreviewTab(defaultPreviewSys)}
+                            className="px-2.5 py-1 rounded bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>查看試算表內容</span>
+                          </button>
+                          {hasRealSheet && (
+                            <a
+                              href={cloudVault.spreadsheetUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1 rounded bg-white border border-emerald-400 hover:bg-emerald-50 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1"
                             >
-                              <CreditCard className="w-3 h-3" />
-                              <span>續約 100 元解鎖</span>
-                            </button>
-                          ) : (
-                            <span className="text-[11px] text-emerald-700 font-semibold">可讀寫</span>
+                              <ExternalLink className="w-3 h-3" />
+                              <span>開啟 Google 試算表 (僅供檢視)</span>
+                            </a>
                           )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(
+                              hasRealSheet ? cloudVault.spreadsheetUrl : cloudVault.spreadsheetId
+                            );
+                            showToast(
+                              hasRealSheet
+                                ? '已複製會員專屬 Google 試算表連結！'
+                                : '已複製試算表 ID（可先按「查看試算表內容」直接預覽）！'
+                            );
+                          }}
+                          className="px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-100 text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>複製</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expiry Simulation Controls */}
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-amber-950">測試未續約唯讀鎖定：</span>
+                      <select
+                        value={vaultTestModuleKey}
+                        onChange={(e) => setVaultTestModuleKey(e.target.value)}
+                        className="bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 cursor-pointer"
+                      >
+                        {ORDERABLE_SOFTWARE_CATALOG.map((c) => (
+                          <option key={c.key} value={c.key}>
+                            {c.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const perm = setModuleExpiryStateForTest(memberMid, vaultTestModuleKey, true);
+                          triggerRefresh();
+                          onNodesChanged?.();
+                          showToast(`已模擬「${perm.softwareTitle}」未續約到期：僅能查看舊資料，禁止新增！`);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Lock className="w-3 h-3" />
+                        <span>模擬到期(唯讀)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const perm = setModuleExpiryStateForTest(memberMid, vaultTestModuleKey, false);
+                          triggerRefresh();
+                          onNodesChanged?.();
+                          showToast(`已恢復「${perm.softwareTitle}」有效授權，解除唯讀！`);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Unlock className="w-3 h-3" />
+                        <span>恢復讀寫</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                        <tr>
+                          <th className="py-2 px-3">工作表分頁 (點擊查看內容)</th>
+                          <th className="py-2 px-3">資料筆數</th>
+                          <th className="py-2 px-3">狀態</th>
+                          <th className="py-2 px-3 text-right">檢視 / 續約</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {cloudVault.sheetTabs.map((tab) => (
+                          <tr key={tab.sysType} className="hover:bg-emerald-50/40">
+                            <td className="py-2 px-3">
+                              <button
+                                type="button"
+                                onClick={() => setCloudSheetPreviewTab(tab.sysType)}
+                                className="text-left group cursor-pointer"
+                              >
+                                <div className="font-semibold text-slate-900 group-hover:text-emerald-700 group-hover:underline">
+                                  {tab.title}
+                                </div>
+                                <div className="font-mono text-[10px] text-slate-400">{tab.tabName}</div>
+                              </button>
+                            </td>
+                            <td className="py-2 px-3 font-mono text-slate-700">{tab.recordCount} 筆</td>
+                            <td className="py-2 px-3">
+                              {tab.canCreate ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                                  <Unlock className="w-3 h-3" />
+                                  <span>{tab.statusLabel}</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-100 text-rose-800 text-[11px] font-bold">
+                                  <Lock className="w-3 h-3" />
+                                  <span>{tab.statusLabel}</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <div className="inline-flex items-center gap-1.5 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => setCloudSheetPreviewTab(tab.sysType)}
+                                  className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>查看內容</span>
+                                </button>
+                                {!tab.canCreate && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const res = renewMemberModuleNow(memberMid, tab.moduleKey);
+                                      triggerRefresh();
+                                      onNodesChanged?.();
+                                      showToast(res.message);
+                                    }}
+                                    className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <CreditCard className="w-3 h-3" />
+                                    <span>續約解鎖</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
@@ -3583,11 +3857,20 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                 className="px-3.5 py-2 rounded-xl bg-[#065fd4] hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${cloudSyncing ? 'animate-spin' : ''}`} />
-                <span>{cloudSyncing ? 'GAS 同步建檔中...' : '立即同步至 GAS Google Drive'}</span>
+                <span>
+                  {cloudSyncing
+                    ? '正在建立並同步真實 Google 試算表...'
+                    : hasRealSheet
+                    ? '同步最新資料至 Google 試算表'
+                    : '一鍵建立真實 Google 試算表並同步'}
+                </span>
               </button>
               <button
                 type="button"
-                onClick={() => setCloudModalOpen(false)}
+                onClick={() => {
+                  setCloudSheetPreviewTab(null);
+                  setCloudModalOpen(false);
+                }}
                 className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 cursor-pointer"
               >
                 關閉視窗
@@ -3595,7 +3878,8 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Hidden File Inputs for Camera & Album Upload */}
       <input

@@ -37,6 +37,7 @@ var GLOBAL_CONFIG = {
   ROOT_DRIVE_FOLDER_NAME: "AIS_ERP_會員專屬雲端空間總庫",
   BACKUP_DRIVE_FOLDER_NAME: "AIS_ERP_核心帳務每日午夜備份庫",
   SHEET_BACKUP_MANIFEST: "_SYS_備份與還原紀錄",
+  SHEET_MEMBER_WORKSPACE: "會員工作區雲端同步表",
   BACKUP_RETENTION_DAYS: 30,
   TIMEZONE: "Asia/Taipei",
   DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
@@ -100,6 +101,15 @@ function doPost(e) {
       case "hqDeleteNode":
         result = hqDeleteNodeInSheet(requestData.data);
         break;
+      case "upsertWorkspaceRecord":
+        result = upsertWorkspaceRecordInSheet(requestData.data);
+        break;
+      case "saveMemberPacks":
+        result = saveMemberPacksInSheet(requestData.data);
+        break;
+      case "upsertCrmRecord":
+        result = upsertCrmRecordInSheet(requestData.data);
+        break;
       case "upsertTodo":
         result = upsertMemberTodo(requestData.memberMid, requestData.data);
         break;
@@ -128,7 +138,12 @@ function doPost(e) {
         result = migrateBatchToMysql(requestData);
         break;
       case "provisionMemberCloudWorkspace":
-        result = provisionMemberCloudWorkspace(requestData.memberMid, requestData.memberName, requestData.tabs);
+        result = provisionMemberCloudWorkspace(
+          requestData.memberMid,
+          requestData.memberName,
+          requestData.tabs,
+          requestData.rowsBySys || null
+        );
         break;
       case "getMemberCloudWorkspace":
         result = getMemberCloudWorkspace(requestData.memberMid);
@@ -1712,7 +1727,126 @@ function getOrCreateRootVaultFolder_() {
   return DriveApp.createFolder(GLOBAL_CONFIG.ROOT_DRIVE_FOLDER_NAME);
 }
 
-function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
+function enableMemberVaultViewSharing_(folderId, spreadsheetId) {
+  try {
+    if (spreadsheetId) {
+      var ssFile = DriveApp.getFileById(spreadsheetId);
+      ssFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      try {
+        ssFile.setShareableByEditors(false);
+      } catch (eShareFlag) {}
+      try {
+        var ownerEmail = ssFile.getOwner() ? ssFile.getOwner().getEmail() : "";
+        var editors = ssFile.getEditors();
+        for (var e = 0; e < editors.length; e++) {
+          var edEmail = editors[e].getEmail();
+          if (edEmail && edEmail !== ownerEmail) {
+            ssFile.removeEditor(editors[e]);
+          }
+        }
+      } catch (eRemEd) {}
+    }
+  } catch (shareErr1) {
+    Logger.log("Spreadsheet Sharing Info: " + shareErr1.toString());
+  }
+  try {
+    if (folderId) {
+      var dirFolder = DriveApp.getFolderById(folderId);
+      dirFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      try {
+        var fOwnerEmail = dirFolder.getOwner() ? dirFolder.getOwner().getEmail() : "";
+        var fEditors = dirFolder.getEditors();
+        for (var f = 0; f < fEditors.length; f++) {
+          var fEdEmail = fEditors[f].getEmail();
+          if (fEdEmail && fEdEmail !== fOwnerEmail) {
+            dirFolder.removeEditor(fEditors[f]);
+          }
+        }
+      } catch (fRemEd) {}
+    }
+  } catch (shareErr2) {
+    Logger.log("Folder Sharing Info: " + shareErr2.toString());
+  }
+}
+
+function lockSheetStrictlyReadOnlyForMembers_(sh, description) {
+  try {
+    var existing = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+    var p = existing.length > 0 ? existing[0] : sh.protect();
+    p.setDescription(description || "會員僅供檢視：禁止於試算表直接修改，所有異動請由系統自動寫入");
+    p.setWarningOnly(false);
+    try {
+      var editors = p.getEditors();
+      if (editors && editors.length > 0) {
+        p.removeEditors(editors);
+      }
+      if (p.canDomainEdit()) {
+        p.setDomainEdit(false);
+      }
+    } catch (edErr) {}
+  } catch (protErr) {
+    Logger.log("Sheet Lock Warning: " + protErr.toString());
+  }
+}
+
+function lockAllMemberSpreadsheetSheetsReadOnly_(spreadsheetId) {
+  try {
+    var memberSs = SpreadsheetApp.openById(spreadsheetId);
+    var allSheets = memberSs.getSheets();
+    for (var s = 0; s < allSheets.length; s++) {
+      lockSheetStrictlyReadOnlyForMembers_(
+        allSheets[s],
+        "會員僅供檢視：禁止於 Google 試算表直接修改或刪除，請透過系統介面操作"
+      );
+    }
+  } catch (e) {
+    Logger.log("Lock All Sheets Warning: " + e.toString());
+  }
+}
+
+function syncMemberSpreadsheetRows_(spreadsheetId, rowsBySys) {
+  if (!spreadsheetId || !rowsBySys || typeof rowsBySys !== "object") return 0;
+  var syncedTabs = 0;
+  try {
+    var memberSs = SpreadsheetApp.openById(spreadsheetId);
+    var keys = Object.keys(rowsBySys);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var payload = rowsBySys[k];
+      if (!payload || !payload.tabName || !Array.isArray(payload.columns) || payload.columns.length === 0) continue;
+      var safeTabName = String(payload.tabName).slice(0, 90);
+      var sh = memberSs.getSheetByName(safeTabName) || memberSs.insertSheet(safeTabName);
+      var cols = payload.columns.slice(0, 25).map(function(c) { return String(c || ""); });
+      var rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 200) : [];
+      var matrix = [cols];
+      for (var r = 0; r < rows.length; r++) {
+        var rec = rows[r] || {};
+        var line = [];
+        for (var c = 0; c < cols.length; c++) {
+          var rawVal = rec[cols[c]];
+          var strVal = rawVal === undefined || rawVal === null ? "" : String(rawVal);
+          if (strVal.indexOf("data:image/") === 0) {
+            strVal = "[系統相簿照片]";
+          }
+          if (strVal.length > 40000) {
+            strVal = strVal.slice(0, 40000);
+          }
+          line.push(strVal);
+        }
+        matrix.push(line);
+      }
+      sh.clearContents();
+      sh.getRange(1, 1, matrix.length, cols.length).setValues(matrix);
+      sh.getRange(1, 1, 1, cols.length).setBackground("#0F172A").setFontColor("#FFFFFF").setFontWeight("bold");
+      syncedTabs++;
+    }
+  } catch (syncErr) {
+    Logger.log("syncMemberSpreadsheetRows_ Warning: " + syncErr.toString());
+  }
+  return syncedTabs;
+}
+
+function provisionMemberCloudWorkspace(memberMid, memberName, customTabs, rowsBySys) {
   var ssMain = SpreadsheetApp.getActiveSpreadsheet();
   var vaultIndexSheet = getOrCreateSheet(ssMain, GLOBAL_CONFIG.SHEET_CLOUD_VAULT);
   if (vaultIndexSheet.getLastRow() === 0) {
@@ -1730,24 +1864,31 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
     var existing = vaultIndexSheet.getRange(2, 1, lastRow - 1, 10).getValues();
     for (var i = 0; i < existing.length; i++) {
       if (String(existing[i][0]).toUpperCase() === mid && existing[i][2] && existing[i][5]) {
-        // 已存在專屬資料夾與試算表：更新最後同步時間並同步各模組唯讀保護狀態
+        // 已存在專屬資料夾與試算表：更新最後同步時間、寫入最新分頁資料並同步唯讀保護狀態
+        var existingFolderId = String(existing[i][2]);
+        var existingSsId = String(existing[i][5]);
         var nowSyncTw = formatTaiwanDateTime_(new Date());
         vaultIndexSheet.getRange(i + 2, 10).setValue(nowSyncTw);
-        if (customTabs && customTabs.length > 0) {
-          syncMemberSpreadsheetTabProtections_(String(existing[i][5]), customTabs);
+        if (rowsBySys) {
+          syncMemberSpreadsheetRows_(existingSsId, rowsBySys);
         }
+        if (customTabs && customTabs.length > 0) {
+          syncMemberSpreadsheetTabProtections_(existingSsId, customTabs);
+        }
+        lockAllMemberSpreadsheetSheetsReadOnly_(existingSsId);
+        enableMemberVaultViewSharing_(existingFolderId, existingSsId);
         return {
           success: true,
           action: "provisionMemberCloudWorkspace",
           memberMid: mid,
           memberName: existing[i][1] || mName,
-          folderId: String(existing[i][2]),
+          folderId: existingFolderId,
           folderName: String(existing[i][3]),
           folderUrl: String(existing[i][4]),
-          spreadsheetId: String(existing[i][5]),
+          spreadsheetId: existingSsId,
           spreadsheetName: String(existing[i][6]),
           spreadsheetUrl: String(existing[i][7]),
-          message: "已讀取既有會員獨立雲端資料夾與 Google 試算表"
+          message: "已更新並同步會員專屬 Google 試算表（已鎖定僅供檢視，會員不可在試算表內修改）！"
         };
       }
     }
@@ -1778,6 +1919,9 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
     var sh = memberSs.insertSheet(defaultTabs[t].name);
     sh.getRange(1, 1, 1, defaultTabs[t].headers.length).setValues([defaultTabs[t].headers]);
   }
+  if (rowsBySys) {
+    syncMemberSpreadsheetRows_(memberSs.getId(), rowsBySys);
+  }
   if (customTabs && customTabs.length > 0) {
     syncMemberSpreadsheetTabProtections_(memberSs.getId(), customTabs);
   }
@@ -1787,6 +1931,9 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
   var folderUrl = memberFolder.getUrl();
   var spreadsheetId = memberSs.getId();
   var spreadsheetUrl = memberSs.getUrl();
+
+  lockAllMemberSpreadsheetSheetsReadOnly_(spreadsheetId);
+  enableMemberVaultViewSharing_(folderId, spreadsheetId);
 
   vaultIndexSheet.appendRow([
     mid, mName, folderId, folderName, folderUrl,
@@ -1804,16 +1951,16 @@ function provisionMemberCloudWorkspace(memberMid, memberName, customTabs) {
     spreadsheetId: spreadsheetId,
     spreadsheetName: sheetTitle,
     spreadsheetUrl: spreadsheetUrl,
-    message: "已為會員 " + mid + " 自動生成獨立雲端資料夾與專屬 Google 試算表！"
+    message: "已為會員 " + mid + " 建立專屬 Google 試算表並鎖定為「僅供檢視（不可直接修改）」！"
   };
 }
 
 function getMemberCloudWorkspace(memberMid) {
-  return provisionMemberCloudWorkspace(memberMid, memberMid, null);
+  return provisionMemberCloudWorkspace(memberMid, memberMid, null, null);
 }
 
 /**
- * 依據會員各 AI 軟體是否續約：未續約 / 已到期之工作表強制設定保護警示 (僅能查看舊資料，不可新增資料)
+ * 所有會員專屬 Google 試算表分頁全面維持唯讀保護：會員僅能查看，絕不可在試算表直接修改或刪除資料
  */
 function syncMemberSpreadsheetTabProtections_(spreadsheetId, tabs) {
   try {
@@ -1821,17 +1968,17 @@ function syncMemberSpreadsheetTabProtections_(spreadsheetId, tabs) {
     for (var i = 0; i < tabs.length; i++) {
       var tab = tabs[i];
       var sh = memberSs.getSheetByName(tab.tabName) || memberSs.insertSheet(tab.tabName);
-      var protections = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET);
       if (tab.readOnly) {
-        if (protections.length === 0) {
-          var p = sh.protect().setDescription("未續約唯讀歸檔鎖定：僅能查看舊資料，不可新增資料");
-          p.setWarningOnly(false);
-        }
+        lockSheetStrictlyReadOnlyForMembers_(
+          sh,
+          "未續約唯讀歸檔鎖定：僅能查看舊資料，系統與試算表皆禁止新增修改"
+        );
         sh.setTabColor("#E11D48");
       } else {
-        for (var j = 0; j < protections.length; j++) {
-          protections[j].remove();
-        }
+        lockSheetStrictlyReadOnlyForMembers_(
+          sh,
+          "會員僅供檢視：禁止於試算表直接修改，請透過系統介面正常新增與維護"
+        );
         sh.setTabColor("#10B981");
       }
     }
@@ -2394,7 +2541,8 @@ function exportHydrationState() {
   var sContactM = ss.getSheetByName(SHEET_CONFIG['CONTACT_M'].sheet);
   if (sContactM && sContactM.getLastRow() >= 2) {
     var cmCount = Math.min(maxRows, sContactM.getLastRow() - 1);
-    var cmVals = sContactM.getRange(2, 1, cmCount, Math.min(10, sContactM.getLastColumn())).getValues();
+    var cmCols = Math.min(12, sContactM.getLastColumn());
+    var cmVals = sContactM.getRange(2, 1, cmCount, cmCols).getValues();
     for (var c = 0; c < cmVals.length; c++) {
       var cr = cmVals[c];
       var cid = String(cr[0] || "").trim().toUpperCase();
@@ -2409,7 +2557,9 @@ function exportHydrationState() {
         email: String(cr[6] || "").trim(),
         address: String(cr[7] || "").trim(),
         photoUrl: String(cr[8] || "").trim(),
-        updatedAt: cr[9] ? formatTaiwanDateTime_(cr[9]) : formatTaiwanDateTime_(new Date())
+        updatedAt: cr[9] ? formatTaiwanDateTime_(cr[9]) : formatTaiwanDateTime_(new Date()),
+        ownerMid: cmCols >= 11 ? String(cr[10] || "").trim().toUpperCase() : "",
+        memberMid: cmCols >= 12 ? String(cr[11] || "").trim().toUpperCase() : ""
       });
     }
   }
@@ -2418,7 +2568,8 @@ function exportHydrationState() {
   var sContactT = ss.getSheetByName(SHEET_CONFIG['CONTACT_T'].sheet);
   if (sContactT && sContactT.getLastRow() >= 2) {
     var ctCount = Math.min(maxRows, sContactT.getLastRow() - 1);
-    var ctVals = sContactT.getRange(2, 1, ctCount, Math.min(9, sContactT.getLastColumn())).getValues();
+    var ctCols = Math.min(11, sContactT.getLastColumn());
+    var ctVals = sContactT.getRange(2, 1, ctCount, ctCols).getValues();
     for (var k = 0; k < ctVals.length; k++) {
       var kr = ctVals[k];
       var tid = String(kr[0] || "").trim().toUpperCase();
@@ -2432,7 +2583,101 @@ function exportHydrationState() {
         discussionContent: String(kr[5] || "").trim(),
         nextStepPlan: String(kr[6] || "").trim(),
         photoUrl: String(kr[7] || "").trim(),
-        updatedAt: kr[8] ? formatTaiwanDateTime_(kr[8]) : formatTaiwanDateTime_(new Date())
+        updatedAt: kr[8] ? formatTaiwanDateTime_(kr[8]) : formatTaiwanDateTime_(new Date()),
+        ownerMid: ctCols >= 10 ? String(kr[9] || "").trim().toUpperCase() : "",
+        memberMid: ctCols >= 11 ? String(kr[10] || "").trim().toUpperCase() : ""
+      });
+    }
+  }
+
+  var events = [];
+  var sEventM = ss.getSheetByName(SHEET_CONFIG['EVENT_M'].sheet);
+  if (sEventM && sEventM.getLastRow() >= 2) {
+    var emCount = Math.min(maxRows, sEventM.getLastRow() - 1);
+    var emVals = sEventM.getRange(2, 1, emCount, Math.min(10, sEventM.getLastColumn())).getValues();
+    for (var em = 0; em < emVals.length; em++) {
+      var er = emVals[em];
+      var eid = String(er[0] || "").trim().toUpperCase();
+      if (!eid) continue;
+      events.push({
+        id: eid,
+        status: String(er[1] || "報名中").trim(),
+        eventTheme: String(er[2] || "").trim(),
+        date: String(er[3] || "").trim(),
+        location: String(er[4] || "").trim(),
+        budget: er[5],
+        leader: String(er[6] || "").trim(),
+        notes: String(er[7] || "").trim(),
+        photoUrl: String(er[8] || "").trim(),
+        updatedAt: er[9] ? formatTaiwanDateTime_(er[9]) : formatTaiwanDateTime_(new Date())
+      });
+    }
+  }
+
+  var eventTrackings = [];
+  var sEventT = ss.getSheetByName(SHEET_CONFIG['EVENT_T'].sheet);
+  if (sEventT && sEventT.getLastRow() >= 2) {
+    var etCount = Math.min(maxRows, sEventT.getLastRow() - 1);
+    var etVals = sEventT.getRange(2, 1, etCount, Math.min(8, sEventT.getLastColumn())).getValues();
+    for (var et = 0; et < etVals.length; et++) {
+      var etr = etVals[et];
+      var etid = String(etr[0] || "").trim().toUpperCase();
+      if (!etid) continue;
+      eventTrackings.push({
+        id: etid,
+        status: String(etr[1] || "公開發布").trim(),
+        eventTheme: String(etr[2] || "").trim(),
+        photoTitle: String(etr[3] || "").trim(),
+        shootLocation: String(etr[4] || "").trim(),
+        contentNotes: String(etr[5] || "").trim(),
+        photoUrl: String(etr[6] || "").trim(),
+        updatedAt: etr[7] ? formatTaiwanDateTime_(etr[7]) : formatTaiwanDateTime_(new Date())
+      });
+    }
+  }
+
+  var workspaceRecords = [];
+  var sWs = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MEMBER_WORKSPACE);
+  if (sWs && sWs.getLastRow() >= 2) {
+    var wsCount = Math.min(maxRows, sWs.getLastRow() - 1);
+    var wsVals = sWs.getRange(2, 1, wsCount, Math.min(7, sWs.getLastColumn())).getValues();
+    for (var w = 0; w < wsVals.length; w++) {
+      var wr = wsVals[w];
+      var wMid = String(wr[0] || "").trim().toUpperCase();
+      var wSys = String(wr[1] || "").trim().toUpperCase();
+      if (!wMid || !wSys) continue;
+      try {
+        var parsedJson = JSON.parse(String(wr[4] || "{}"));
+        if (wSys === "_PACKS" && Array.isArray(parsedJson)) {
+          workspaceRecords.push({ memberMid: wMid, sysType: "_PACKS", packs: parsedJson });
+        } else if (parsedJson && typeof parsedJson === "object") {
+          var fullPhoto = String(wr[5] || "") + String(wr[6] || "");
+          if (fullPhoto) parsedJson["照片連結"] = fullPhoto;
+          workspaceRecords.push({ memberMid: wMid, sysType: wSys, record: parsedJson });
+        }
+      } catch (parseErr) {}
+    }
+  }
+
+  var cloudVaults = [];
+  var sVault = ss.getSheetByName(GLOBAL_CONFIG.SHEET_CLOUD_VAULT);
+  if (sVault && sVault.getLastRow() >= 2) {
+    var vCount = Math.min(maxRows, sVault.getLastRow() - 1);
+    var vVals = sVault.getRange(2, 1, vCount, Math.min(8, sVault.getLastColumn())).getValues();
+    for (var v = 0; v < vVals.length; v++) {
+      var vr = vVals[v];
+      var vMid = String(vr[0] || "").trim().toUpperCase();
+      var vSsId = String(vr[5] || "").trim();
+      if (!vMid || !vSsId) continue;
+      cloudVaults.push({
+        memberMid: vMid,
+        memberName: String(vr[1] || vMid).trim(),
+        folderId: String(vr[2] || "").trim(),
+        folderName: String(vr[3] || "").trim(),
+        folderUrl: String(vr[4] || "").trim(),
+        spreadsheetId: vSsId,
+        spreadsheetName: String(vr[6] || "").trim(),
+        spreadsheetUrl: String(vr[7] || "").trim()
       });
     }
   }
@@ -2446,7 +2691,11 @@ function exportHydrationState() {
       monolineNodes: monolineNodes,
       binaryNodes: binaryNodes,
       contacts: contacts,
-      contactTrackings: contactTrackings
+      contactTrackings: contactTrackings,
+      events: events,
+      eventTrackings: eventTrackings,
+      workspaceRecords: workspaceRecords,
+      cloudVaults: cloudVaults
     }
   };
 }
@@ -2922,6 +3171,225 @@ function hqDeleteNodeInSheet(data) {
       ? "已從試算表「" + sheetName + "」安全移除節點 " + nodeId
       : "試算表「" + sheetName + "」中無節點 " + nodeId
   };
+}
+
+/**
+ * ============================================================================
+ * 18. 會員跨裝置工作區與 CRM / 活動即時寫入試算表 (手機 <-> 伺服器 <-> 桌機)
+ * - 照片超過單格上限時自動分段儲存 (每格 <= 45,000 字元，最高支援 90,000 字元圖檔)
+ * ============================================================================
+ */
+function ensureMemberWorkspaceSheet_(ss) {
+  var sh = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_MEMBER_WORKSPACE);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow([
+      "會員MID", "模組代碼", "資料ID", "更新時間", "資料JSON(不含大圖)", "照片資料(分段1)", "照片資料(分段2)"
+    ]);
+    sh.getRange(1, 1, 1, 7).setBackground("#0F172A").setFontColor("#FFFFFF").setFontWeight("bold");
+  }
+  return sh;
+}
+
+function upsertWorkspaceRecordInSheet(data) {
+  data = data || {};
+  var memberMid = String(data.memberMid || "").trim().toUpperCase();
+  var sysType = String(data.sysType || "").trim().toUpperCase();
+  var rec = data.record || {};
+  var recId = String(rec.ID || "").trim();
+  if (!memberMid || !sysType || !recId) {
+    return { success: false, error: "缺少必要參數 (memberMid / sysType / record.ID)" };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ensureMemberWorkspaceSheet_(ss);
+  var nowTw = formatTaiwanDateTime_(new Date());
+
+  var photoStr = String(rec["照片連結"] || rec.photoUrl || "");
+  var photoPart1 = photoStr.slice(0, 45000);
+  var photoPart2 = photoStr.length > 45000 ? photoStr.slice(45000, 90000) : "";
+
+  var metaRec = {};
+  for (var k in rec) {
+    if (Object.prototype.hasOwnProperty.call(rec, k) && k !== "照片連結" && k !== "photoUrl") {
+      metaRec[k] = rec[k];
+    }
+  }
+  metaRec.ID = recId;
+  var jsonStr = JSON.stringify(metaRec).slice(0, 45000);
+
+  var lastRow = sh.getLastRow();
+  var targetRow = -1;
+  if (lastRow >= 2) {
+    var keys = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      if (
+        String(keys[i][0] || "").trim().toUpperCase() === memberMid &&
+        String(keys[i][1] || "").trim().toUpperCase() === sysType &&
+        String(keys[i][2] || "").trim() === recId
+      ) {
+        targetRow = i + 2;
+        break;
+      }
+    }
+  }
+
+  var rowValues = [memberMid, sysType, recId, nowTw, jsonStr, photoPart1, photoPart2];
+  if (targetRow >= 2) {
+    sh.getRange(targetRow, 1, 1, 7).setNumberFormat("@").setValues([rowValues]);
+  } else {
+    appendRowWithPlainTextCols_(sh, rowValues, [1, 2, 3, 4, 5, 6, 7]);
+  }
+  SpreadsheetApp.flush();
+  return { success: true, memberMid: memberMid, sysType: sysType, recordId: recId };
+}
+
+function saveMemberPacksInSheet(data) {
+  data = data || {};
+  var memberMid = String(data.memberMid || "").trim().toUpperCase();
+  var packs = Array.isArray(data.packs) ? data.packs : [];
+  if (!memberMid) return { success: false, error: "缺少 memberMid" };
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ensureMemberWorkspaceSheet_(ss);
+  var nowTw = formatTaiwanDateTime_(new Date());
+  var jsonStr = JSON.stringify(packs);
+
+  var lastRow = sh.getLastRow();
+  var targetRow = -1;
+  if (lastRow >= 2) {
+    var keys = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < keys.length; i++) {
+      if (
+        String(keys[i][0] || "").trim().toUpperCase() === memberMid &&
+        String(keys[i][1] || "").trim().toUpperCase() === "_PACKS" &&
+        String(keys[i][2] || "").trim() === "UNLOCKED"
+      ) {
+        targetRow = i + 2;
+        break;
+      }
+    }
+  }
+
+  var rowValues = [memberMid, "_PACKS", "UNLOCKED", nowTw, jsonStr, "", ""];
+  if (targetRow >= 2) {
+    sh.getRange(targetRow, 1, 1, 7).setNumberFormat("@").setValues([rowValues]);
+  } else {
+    appendRowWithPlainTextCols_(sh, rowValues, [1, 2, 3, 4, 5, 6, 7]);
+  }
+  SpreadsheetApp.flush();
+  return { success: true, memberMid: memberMid, packs: packs };
+}
+
+function upsertCrmRecordInSheet(data) {
+  data = data || {};
+  var sysType = String(data.sysType || "").trim().toUpperCase();
+  var rec = data.record || {};
+  var cfg = SHEET_CONFIG[sysType];
+  if (!cfg || !rec.id) {
+    return { success: false, error: "不支援的 CRM/活動模組或缺少 ID: " + sysType };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = getOrCreateSheet(ss, cfg.sheet);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(cfg.headers);
+    sh.getRange(1, 1, 1, cfg.headers.length).setBackground("#0284C7").setFontColor("#FFFFFF").setFontWeight("bold");
+  }
+
+  var id = String(rec.id).trim().toUpperCase();
+  var nowTw = formatTaiwanDateTime_(rec.updatedAt ? parseTaiwanDate_(rec.updatedAt) : new Date());
+  var safePhoto = String(rec.photoUrl || "");
+  if (safePhoto.length > 48000) {
+    safePhoto = "";
+  }
+
+  var rowValues = [];
+  var plainCols = [];
+  if (sysType === "CONTACT_M") {
+    rowValues = [
+      id,
+      String(rec.status || "開通AI軟體1+1"),
+      String(rec.name || ""),
+      normalizePhoneText_(rec.phone || ""),
+      String(rec.tel || ""),
+      String(rec.line || ""),
+      String(rec.email || ""),
+      String(rec.address || ""),
+      safePhoto,
+      nowTw,
+      String(rec.ownerMid || ""),
+      String(rec.memberMid || "")
+    ];
+    plainCols = [4, 5, 6, 9, 10, 11, 12];
+  } else if (sysType === "CONTACT_T") {
+    rowValues = [
+      id,
+      String(rec.status || "已完成"),
+      String(rec.name || ""),
+      String(rec.contactDate || Utilities.formatDate(new Date(), GLOBAL_CONFIG.TIMEZONE, "yyyy-MM-dd")),
+      String(rec.contactMethod || "Line"),
+      String(rec.discussionContent || ""),
+      String(rec.nextStepPlan || ""),
+      safePhoto,
+      nowTw,
+      String(rec.ownerMid || ""),
+      String(rec.memberMid || "")
+    ];
+    plainCols = [4, 8, 9, 10, 11];
+  } else if (sysType === "EVENT_M") {
+    rowValues = [
+      id,
+      String(rec.status || "報名中"),
+      String(rec.eventTheme || ""),
+      String(rec.date || ""),
+      String(rec.location || ""),
+      rec.budget !== undefined ? rec.budget : 0,
+      String(rec.leader || ""),
+      String(rec.notes || ""),
+      safePhoto,
+      nowTw
+    ];
+    plainCols = [4, 9, 10];
+  } else if (sysType === "EVENT_T") {
+    rowValues = [
+      id,
+      String(rec.status || "公開發布"),
+      String(rec.eventTheme || ""),
+      String(rec.photoTitle || ""),
+      String(rec.shootLocation || ""),
+      String(rec.contentNotes || ""),
+      safePhoto,
+      nowTw
+    ];
+    plainCols = [7, 8];
+  } else {
+    return { success: false, error: "未定義的寫入類型: " + sysType };
+  }
+
+  var lastRow = sh.getLastRow();
+  var targetRow = -1;
+  if (lastRow >= 2) {
+    var ids = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || "").trim().toUpperCase() === id) {
+        targetRow = i + 2;
+        break;
+      }
+    }
+  }
+
+  if (targetRow >= 2) {
+    for (var p = 0; p < plainCols.length; p++) {
+      if (plainCols[p] <= rowValues.length) {
+        sh.getRange(targetRow, plainCols[p]).setNumberFormat("@");
+      }
+    }
+    sh.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+  } else {
+    appendRowWithPlainTextCols_(sh, rowValues, plainCols);
+  }
+  SpreadsheetApp.flush();
+  return { success: true, sysType: sysType, id: id };
 }
 `;
 

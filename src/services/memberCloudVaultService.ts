@@ -14,8 +14,8 @@ import {
   saveMemberModuleSubscriptions,
   saveMemberUnlockedPacks,
 } from './memberFiveStarConfig';
-import { getGasTodoSyncState } from './gasTodoSyncService';
 import { notifyNodesUpdated } from './softwareNodeSync';
+import { apiProvisionMemberCloudWorkspace } from './confidentialApiClient';
 import { Member } from '../types/erp';
 
 export const CLOUD_VAULT_UPDATED_EVENT = 'ais-cloud-vault-updated';
@@ -71,6 +71,35 @@ function normalizeBaseKey(rawKey: string): string {
     return upper.slice(0, -2);
   }
   return upper;
+}
+
+export function isRealGoogleSheetId(id?: string): boolean {
+  const s = (id || '').trim();
+  if (!s) return false;
+  if (s.startsWith('GSHEET-') || s.startsWith('GDRV-')) return false;
+  return /^[A-Za-z0-9_-]{15,120}$/.test(s);
+}
+
+export function isRealGoogleFolderId(id?: string): boolean {
+  const s = (id || '').trim();
+  if (!s) return false;
+  if (s.startsWith('GDRV-') || s.startsWith('GSHEET-')) return false;
+  return /^[A-Za-z0-9_-]{15,120}$/.test(s);
+}
+
+export function isSafeGoogleCloudUrl(rawUrl?: string): boolean {
+  const s = (rawUrl || '').trim();
+  if (!s) return false;
+  try {
+    const parsed = new URL(s);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'docs.google.com' && host !== 'drive.google.com') return false;
+    if (parsed.pathname.includes('/GSHEET-') || parsed.pathname.includes('/GDRV-')) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function makeDeterministicDriveIds(mid: string, name: string) {
@@ -266,6 +295,170 @@ function countModuleRecords(member: Member | undefined, sysType: string): number
   return loadMemberDynamicRecords(member.mid, sysType).length;
 }
 
+export interface MemberSheetTabData {
+  sysType: string;
+  tabName: string;
+  title: string;
+  columns: string[];
+  rows: Array<Record<string, string>>;
+  recordCount: number;
+}
+
+function formatDateTimeCell(raw?: string): string {
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return String(raw);
+  return d.toLocaleString('zh-TW', { hour12: false });
+}
+
+/**
+ * 讀取指定會員某個試算表工作表分頁的完整即時欄位與資料列（供系統內試算表檢視器、CSV 匯出與 GAS 同步使用）
+ */
+export function getMemberCloudSheetTabData(memberMid: string, sysType: string): MemberSheetTabData {
+  const normalizedMid = memberMid.trim().toUpperCase();
+  const normalizedSys = sysType.trim().toUpperCase();
+  const conf = SYS_CONFIG[normalizedSys];
+  const baseKey = normalizeBaseKey(normalizedSys);
+  const cat = ORDERABLE_SOFTWARE_CATALOG.find((c) => c.key === baseKey);
+  const baseTitle = cat?.title || baseKey;
+  const tabLabel = conf ? conf.name : normalizedSys === 'BOOKING_T' ? '2. 個人預約明細' : normalizedSys;
+  const cleanLabel = tabLabel.replace(/^\d+\.\s*/, '');
+  const tabName = `${normalizedSys}_${cleanLabel}`;
+  const title = `${baseTitle} · ${cleanLabel}`;
+
+  if (normalizedSys === 'CONTACT_M') {
+    const columns = ['ID', '狀態', '姓名', '手機', '電話', 'LINE', 'Email', '住址', '照片連結', '最後更新'];
+    const rows = erpEngine
+      .getAllContacts()
+      .filter((c) => c.ownerMid === normalizedMid || c.memberMid === normalizedMid)
+      .map((c) => ({
+        ID: c.id || '',
+        狀態: c.status || '',
+        姓名: c.name || '',
+        手機: c.phone || '',
+        電話: c.tel || '',
+        LINE: c.line || '',
+        Email: c.email || '',
+        住址: c.address || '',
+        照片連結: c.photoUrl || '',
+        最後更新: formatDateTimeCell(c.updatedAt),
+      }));
+    return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
+  }
+
+  if (normalizedSys === 'CONTACT_T') {
+    const columns = ['ID', '狀態', '聯絡對象', '日期', '方式', '內容摘要', '下一步計畫', '照片連結', '紀錄時間'];
+    const rows = erpEngine
+      .getAllContactTrackings()
+      .filter((t) => t.ownerMid === normalizedMid || t.memberMid === normalizedMid)
+      .map((t) => ({
+        ID: t.id || '',
+        狀態: t.status || '',
+        聯絡對象: t.name || '',
+        日期: t.contactDate || '',
+        方式: t.contactMethod || '',
+        內容摘要: t.discussionContent || '',
+        下一步計畫: t.nextStepPlan || '',
+        照片連結: t.photoUrl || '',
+        紀錄時間: formatDateTimeCell(t.updatedAt),
+      }));
+    return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
+  }
+
+  if (normalizedSys === 'EVENT_M') {
+    const columns = ['ID', '狀態', '活動主題', '日期', '地點', '預算', '負責人', '備註', '照片連結', '最後更新'];
+    const rows = erpEngine.getAllEvents().map((e) => ({
+      ID: e.id || '',
+      狀態: e.status || '',
+      活動主題: e.eventTheme || '',
+      日期: e.date || '',
+      地點: e.location || '',
+      預算: e.budget !== undefined ? String(e.budget) : '',
+      負責人: e.leader || '',
+      備註: e.notes || '',
+      照片連結: e.photoUrl || '',
+      最後更新: formatDateTimeCell(e.updatedAt),
+    }));
+    return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
+  }
+
+  if (normalizedSys === 'EVENT_T') {
+    const columns = ['ID', '狀態', '活動主題', '照片標題', '拍攝地點', '內容說明', '照片連結', '紀錄時間'];
+    const rows = erpEngine.getAllEventTrackings().map((t) => ({
+      ID: t.id || '',
+      狀態: t.status || '',
+      活動主題: t.eventTheme || '',
+      照片標題: t.photoTitle || '',
+      拍攝地點: t.shootLocation || '',
+      內容說明: t.contentNotes || '',
+      照片連結: t.photoUrl || '',
+      紀錄時間: formatDateTimeCell(t.updatedAt),
+    }));
+    return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
+  }
+
+  if (normalizedSys === 'BOOKING_T') {
+    const columns = ['預約編號', '狀態', '客戶姓名', '手機', '預約日期', '時段', '服務項目', '備註', '建立時間'];
+    const rows = erpEngine.getAppointmentsByOwner(normalizedMid).map((a) => ({
+      預約編號: a.appointmentId || '',
+      狀態: a.status || '',
+      客戶姓名: a.clientName || '',
+      手機: a.clientPhone || '',
+      預約日期: a.date || '',
+      時段: a.timeSlot || '',
+      服務項目: a.serviceTitle || '',
+      備註: a.notes || a.reason || '',
+      建立時間: formatDateTimeCell(a.createdAt),
+    }));
+    return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
+  }
+
+  const dynRecords = loadMemberDynamicRecords(normalizedMid, normalizedSys);
+  const baseCols = conf
+    ? ['ID', '狀態', ...conf.fields.map((f) => f.id), '照片連結', '最後更新']
+    : ['ID', '狀態', '名稱', '備註', '照片連結', '最後更新'];
+  const colSet = new Set<string>(baseCols);
+  dynRecords.forEach((rec) => {
+    Object.keys(rec || {}).forEach((k) => {
+      if (k && !k.startsWith('_')) colSet.add(k);
+    });
+  });
+  const columns = Array.from(colSet);
+  const rows = dynRecords.map((rec) => {
+    const row: Record<string, string> = {};
+    columns.forEach((col) => {
+      const val = rec[col];
+      row[col] = val === undefined || val === null ? '' : String(val);
+    });
+    return row;
+  });
+  return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
+}
+
+/**
+ * 產生安全可由 Excel / Google 試算表直接開啟的 UTF-8 BOM CSV 內容（含公式注入防護）
+ */
+export function buildMemberSheetTabCsv(tabData: MemberSheetTabData): string {
+  const escapeCell = (raw: string): string => {
+    let val = raw ?? '';
+    if (val.startsWith('data:image/')) {
+      val = '[系統相簿照片]';
+    }
+    if (/^[=+\-@\t\r]/.test(val)) {
+      val = `'${val}`;
+    }
+    if (/[",\r\n]/.test(val)) {
+      return `"${val.replace(/"/g, '""')}"`;
+    }
+    return val;
+  };
+  const headerLine = tabData.columns.map(escapeCell).join(',');
+  const bodyLines = tabData.rows.map((r) =>
+    tabData.columns.map((col) => escapeCell(r[col] || '')).join(',')
+  );
+  return `\uFEFF${[headerLine, ...bodyLines].join('\r\n')}`;
+}
+
 /**
  * 自動為指定會員生成並維護獨立雲端資料夾與專屬 Google 試算表結構
  */
@@ -278,15 +471,49 @@ export function ensureMemberCloudWorkspace(memberMid: string): MemberCloudWorksp
   const vaultMap = loadStoredVaultMap();
   const existing = vaultMap[normalizedMid];
 
-  const folderId = existing?.folderId || member?.cloudFolderId || fallbackIds.folderId;
-  const folderName = existing?.folderName || member?.cloudFolderName || fallbackIds.folderName;
-  const folderUrl = existing?.folderUrl || member?.cloudFolderUrl || fallbackIds.folderUrl;
-  const spreadsheetId =
-    existing?.spreadsheetId || member?.cloudSpreadsheetId || fallbackIds.spreadsheetId;
+  // 優先採用伺服器回傳的真實 Google Drive / Google Sheets ID，避免被舊快取假 ID 蓋掉
+  const memberHasRealSheet = isRealGoogleSheetId(member?.cloudSpreadsheetId);
+  const existingHasRealSheet = isRealGoogleSheetId(existing?.spreadsheetId);
+  const memberHasRealFolder = isRealGoogleFolderId(member?.cloudFolderId);
+  const existingHasRealFolder = isRealGoogleFolderId(existing?.folderId);
+
+  const folderId = memberHasRealFolder
+    ? member!.cloudFolderId!
+    : existingHasRealFolder
+    ? existing!.folderId!
+    : existing?.folderId || member?.cloudFolderId || fallbackIds.folderId;
+  const folderName =
+    (memberHasRealFolder ? member?.cloudFolderName : existing?.folderName) ||
+    member?.cloudFolderName ||
+    fallbackIds.folderName;
+  const folderUrl =
+    memberHasRealFolder && isSafeGoogleCloudUrl(member?.cloudFolderUrl)
+      ? member!.cloudFolderUrl!
+      : existingHasRealFolder && isSafeGoogleCloudUrl(existing?.folderUrl)
+      ? existing!.folderUrl!
+      : isRealGoogleFolderId(folderId)
+      ? `https://drive.google.com/drive/folders/${folderId}`
+      : fallbackIds.folderUrl;
+
+  const spreadsheetId = memberHasRealSheet
+    ? member!.cloudSpreadsheetId!
+    : existingHasRealSheet
+    ? existing!.spreadsheetId!
+    : existing?.spreadsheetId || member?.cloudSpreadsheetId || fallbackIds.spreadsheetId;
   const spreadsheetName =
-    existing?.spreadsheetName || member?.cloudSpreadsheetName || fallbackIds.spreadsheetName;
+    (memberHasRealSheet ? member?.cloudSpreadsheetName : existing?.spreadsheetName) ||
+    member?.cloudSpreadsheetName ||
+    fallbackIds.spreadsheetName;
   const spreadsheetUrl =
-    existing?.spreadsheetUrl || member?.cloudSpreadsheetUrl || fallbackIds.spreadsheetUrl;
+    memberHasRealSheet && isSafeGoogleCloudUrl(member?.cloudSpreadsheetUrl)
+      ? member!.cloudSpreadsheetUrl!
+      : existingHasRealSheet && isSafeGoogleCloudUrl(existing?.spreadsheetUrl)
+      ? existing!.spreadsheetUrl!
+      : isRealGoogleSheetId(spreadsheetId)
+      ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}`
+      : fallbackIds.spreadsheetUrl;
+
+  const isLiveGoogleDrive = isRealGoogleSheetId(spreadsheetId) && isSafeGoogleCloudUrl(spreadsheetUrl);
 
   const nowIso = new Date().toISOString();
   const unlocked = getMemberUnlockedPacks(normalizedMid);
@@ -324,10 +551,10 @@ export function ensureMemberCloudWorkspace(memberMid: string): MemberCloudWorksp
         isExpired: perm.isExpired,
         isNotOrdered: perm.isNotOrdered,
         statusLabel: perm.canCreate
-          ? '可讀寫 (授權有效)'
+          ? '試算表唯讀檢視（系統可新增）'
           : perm.isExpired
-          ? '未續約唯讀 (僅查舊資料 · 禁新增)'
-          : '尚未訂購 (僅查舊資料 · 禁新增)',
+          ? '未續約唯讀（僅查舊資料 · 禁新增）'
+          : '尚未訂購（僅查舊資料 · 禁新增）',
         expiresAt: perm.expiresAt,
       });
     });
@@ -342,7 +569,7 @@ export function ensureMemberCloudWorkspace(memberMid: string): MemberCloudWorksp
     spreadsheetId,
     spreadsheetName,
     spreadsheetUrl,
-    provisionMode: existing?.provisionMode || 'AUTO_PROVISIONED_LOCAL',
+    provisionMode: isLiveGoogleDrive ? 'LIVE_GAS_DRIVE' : 'AUTO_PROVISIONED_LOCAL',
     createdAt: existing?.createdAt || member?.registeredAt || nowIso,
     lastSyncedAt: nowIso,
     sheetTabs,
@@ -376,7 +603,7 @@ export function provisionAllMembersCloudWorkspaces(): number {
 }
 
 /**
- * 呼叫 GAS Web App (Code.gs) 實際在 Google Drive 建立會員專屬資料夾與 Google 試算表
+ * 透過已驗證伺服器代理呼叫 GAS (Code.gs)，實際於 Google Drive 建立會員專屬資料夾與 Google 試算表並回傳真實 ID/連結
  */
 export async function syncMemberCloudWorkspaceWithGas(memberMid: string): Promise<{
   success: boolean;
@@ -384,57 +611,91 @@ export async function syncMemberCloudWorkspaceWithGas(memberMid: string): Promis
   message: string;
 }> {
   const workspace = ensureMemberCloudWorkspace(memberMid);
-  const gasState = getGasTodoSyncState(memberMid);
-  const gasUrl = gasState.gasWebAppUrl?.trim();
 
-  if (!gasUrl) {
-    return {
-      success: true,
-      workspace,
-      message: `已完成「${workspace.folderName}」與獨立試算表建檔（待設定 GAS URL 後可一鍵實機寫入 Google Drive）`,
+  const rowsBySys: Record<
+    string,
+    { tabName: string; columns: string[]; rows: Array<Record<string, string>> }
+  > = {};
+  workspace.sheetTabs.forEach((tab) => {
+    const tabData = getMemberCloudSheetTabData(workspace.memberMid, tab.sysType);
+    rowsBySys[tab.sysType] = {
+      tabName: tabData.tabName,
+      columns: tabData.columns,
+      rows: tabData.rows.map((r) => {
+        const cleanRow: Record<string, string> = {};
+        tabData.columns.forEach((col) => {
+          const val = r[col] || '';
+          cleanRow[col] = val.startsWith('data:image/') ? '[系統相簿照片]' : val;
+        });
+        return cleanRow;
+      }),
     };
-  }
+  });
 
   try {
-    await fetch(gasUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'provisionMemberCloudWorkspace',
-        memberMid: workspace.memberMid,
-        memberName: workspace.memberName,
-        folderName: workspace.folderName,
-        spreadsheetName: workspace.spreadsheetName,
-        tabs: workspace.sheetTabs.map((t) => ({
-          sysType: t.sysType,
-          tabName: t.tabName,
-          canCreate: t.canCreate,
-          readOnly: !t.canCreate,
-        })),
-      }),
+    const res = await apiProvisionMemberCloudWorkspace(workspace.memberMid, {
+      tabs: workspace.sheetTabs.map((t) => ({
+        sysType: t.sysType,
+        tabName: t.tabName,
+        canCreate: t.canCreate,
+        readOnly: !t.canCreate,
+      })),
+      rowsBySys,
     });
 
-    const vaultMap = loadStoredVaultMap();
-    vaultMap[workspace.memberMid] = {
-      ...vaultMap[workspace.memberMid],
-      provisionMode: 'LIVE_GAS_DRIVE',
-      lastSyncedAt: new Date().toISOString(),
-    };
-    saveStoredVaultMap(vaultMap);
-    const updated = ensureMemberCloudWorkspace(memberMid);
-    notifyCloudVaultUpdated(memberMid);
+    if (res.ok && res.vault && isRealGoogleSheetId(res.vault.spreadsheetId)) {
+      if (res.bootstrap) {
+        erpEngine.hydrateFromServer(res.bootstrap);
+      } else {
+        erpEngine.updateMemberProfile(workspace.memberMid, {
+          cloudFolderId: res.vault.folderId || workspace.folderId,
+          cloudFolderName: res.vault.folderName || workspace.folderName,
+          cloudFolderUrl: res.vault.folderUrl || workspace.folderUrl,
+          cloudSpreadsheetId: res.vault.spreadsheetId,
+          cloudSpreadsheetName: res.vault.spreadsheetName || workspace.spreadsheetName,
+          cloudSpreadsheetUrl: res.vault.spreadsheetUrl,
+        });
+      }
+
+      const vaultMap = loadStoredVaultMap();
+      vaultMap[workspace.memberMid] = {
+        ...vaultMap[workspace.memberMid],
+        folderId: res.vault.folderId || workspace.folderId,
+        folderName: res.vault.folderName || workspace.folderName,
+        folderUrl: res.vault.folderUrl || workspace.folderUrl,
+        spreadsheetId: res.vault.spreadsheetId,
+        spreadsheetName: res.vault.spreadsheetName || workspace.spreadsheetName,
+        spreadsheetUrl: res.vault.spreadsheetUrl,
+        provisionMode: 'LIVE_GAS_DRIVE',
+        lastSyncedAt: new Date().toISOString(),
+      };
+      saveStoredVaultMap(vaultMap);
+
+      const updated = ensureMemberCloudWorkspace(memberMid);
+      notifyCloudVaultUpdated(memberMid);
+
+      return {
+        success: true,
+        workspace: updated,
+        message:
+          res.message ||
+          `已建立真實 Google 試算表 (${updated.spreadsheetId}) 並寫入資料，可直接點擊開啟檢視！`,
+      };
+    }
 
     return {
-      success: true,
-      workspace: updated,
-      message: `已透過 GAS DriveApp / SpreadsheetApp 建置「${updated.folderName}」專屬雲端資料夾與試算表！`,
+      success: false,
+      workspace,
+      message:
+        res.message ||
+        res.error ||
+        '目前尚未建立外部 Google 試算表實檔，您可直接點擊試算表 ID 於系統內預覽全部內容或匯出 CSV。',
     };
   } catch {
     return {
       success: false,
       workspace,
-      message: `GAS 連線暫時異常，已保留「${workspace.spreadsheetName}」本機雲端映射索引。`,
+      message: '連線雲端試算表建檔伺服器暫時異常，您仍可先於系統內即時查看試算表內容。',
     };
   }
 }
