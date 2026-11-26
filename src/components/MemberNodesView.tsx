@@ -42,7 +42,7 @@ interface MemberNodesViewProps {
 }
 
 export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
-  initialQuery = 'A-00001',
+  initialQuery = 'A-00064',
   scopedMode = false,
   onNavigateToTree,
   onSelectForSettlement,
@@ -51,7 +51,7 @@ export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
   const [query, setQuery] = useState(initialQuery);
   const [activeTab, setActiveTab] = useState<'owned' | 'binary_downline' | 'monoline_aid' | 'fifteen_gen' | 'referrals'>('fifteen_gen');
   const [report, setReport] = useState<MemberFullNodeReport | null>(() => {
-    const initial = erpEngine.getMemberFullNodeReport(initialQuery) || erpEngine.getMemberFullNodeReport('A-00001113');
+    const initial = erpEngine.getMemberFullNodeReport(initialQuery) || erpEngine.getMemberFullNodeReport('A-00008');
     if (initial) {
       syncMemberPurchasedProductsToNodes(initial.member.mid);
       return erpEngine.getMemberFullNodeReport(initial.member.mid);
@@ -154,21 +154,21 @@ export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
               <span className="text-slate-400">快捷速查：</span>
               <button
                 onClick={() => {
-                  setQuery('A-00001');
-                  handleSearch('A-00001');
+                  setQuery('A-00064');
+                  handleSearch('A-00064');
                 }}
                 className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-emerald-300 font-mono text-xs cursor-pointer transition-colors"
               >
-                A-00001 (首位新會員)
+                A-00064 (永吉家族·李永吉)
               </button>
               <button
                 onClick={() => {
-                  setQuery('A-00001113');
-                  handleSearch('A-00001113');
+                  setQuery('A-00008');
+                  handleSearch('A-00008');
                 }}
                 className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-indigo-300 font-mono text-xs cursor-pointer transition-colors"
               >
-                A-00001113 (旗艦領袖-514席)
+                A-00008 (總部對外直推首席)
               </button>
               <button
                 onClick={() => {
@@ -193,7 +193,7 @@ export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
             <div className="relative flex-1">
               <input
                 type="text"
-                placeholder="請輸入會員 MID (例如 A-00001, A-00001113) 或節點代號 (例如 C-00001, C-25000001)..."
+                placeholder="請輸入會員 MID (例如 A-00064, A-00008) 或節點代號 (例如 C-00064, C-25000001)..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 font-mono focus:outline-none focus:border-indigo-500"
@@ -1305,7 +1305,7 @@ export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
         </div>
       ) : (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500 text-xs">
-          請在上方搜尋列輸入會員 MID (例：A-00001, A-00001113) 或節點代號 (例：C-00001, C-25000001) 進行查詢。
+          請在上方搜尋列輸入會員 MID (例：A-00064, A-00008) 或節點代號 (例：C-00064, C-25000001) 進行查詢。
         </div>
       )}
     </div>

@@ -413,10 +413,8 @@ export default function App() {
   };
 
   const handleResetSystem = () => {
-    if (window.confirm('確定要將系統狀態重設為初始開局（保留創始世代與雙軌 513 席自營節點）嗎？')) {
-      erpEngine.initializeSystem(true);
-      refreshStats();
-    }
+    erpEngine.initializeSystem(true);
+    refreshStats();
   };
 
   const navigateToTreeWithNode = (nodeId?: string) => {
@@ -1012,7 +1010,7 @@ export default function App() {
           </div>
           <div className="font-mono text-slate-500 text-center sm:text-right">
             {session.role === 'HQ_STAFF'
-              ? '定海神針: C-25000001 · 旗艦領袖: A-00001113 · 閉環 100 點零沉澱'
+              ? '定海神針: C-25000001 · 公司自營63席: A-00001~A-00063 · 對外開放: A-00064起'
               : '3 大 AI 智能雲端工具 · 伺服器加密授權保護'}
           </div>
         </div>

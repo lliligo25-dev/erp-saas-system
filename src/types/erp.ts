@@ -12,7 +12,7 @@ export interface Member {
   name: string;
   phone: string;
   idNumberMasked: string;
-  sponsorMid: string; // 直推推薦人 MID (例如 A-00001113)
+  sponsorMid: string; // 直推推薦人 MID (例如 A-00008)
   storeId: string;    // 所屬經營店 ID (預設 S-001)
   centerId: string;   // 所屬教育中心 ID (預設 C-001)
   registeredAt: string;

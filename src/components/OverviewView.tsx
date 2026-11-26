@@ -326,8 +326,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                   <span className="font-mono text-indigo-300">C-25000001 (Depth = 0)</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">開局自營節點池：</span>
-                  <span className="font-mono text-slate-300">C-25000002 ~ C-25000514 (513 席)</span>
+                  <span className="text-slate-400">公司自營不得轉讓 (63 席)：</span>
+                  <span className="font-mono text-slate-300">C-25000001 ~ C-25000063 (永久鎖定)</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">滑落演算法：</span>
@@ -388,28 +388,24 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
 
           <div className="space-y-3 text-xs">
             <div className="flex items-center justify-between py-2 border-b border-slate-800">
-              <span className="text-slate-400">新會員 MID (A-碼) 建檔起編</span>
-              <span className="font-mono text-slate-200">A-00001 起編 (A-00001 ~ A-25000000)</span>
+              <span className="text-slate-400">單軌編號 (MID / 節點)</span>
+              <span className="font-mono text-teal-300">A-00001 ~ A-25000000 / C-00001 ~ C-25000000</span>
             </div>
             <div className="flex items-center justify-between py-2 border-b border-slate-800">
-              <span className="text-slate-400">雙軌會員 MID (A-碼) 起始</span>
-              <span className="font-mono text-indigo-300 font-bold">A-25000001 起算</span>
+              <span className="text-slate-400">雙軌編號 (MID / 節點)</span>
+              <span className="font-mono text-indigo-300 font-bold">A-25000001 起 / C-25000001 起</span>
             </div>
             <div className="flex items-center justify-between py-2 border-b border-slate-800">
-              <span className="text-slate-400">單軌公排節點 ID (C-碼) 起編</span>
-              <span className="font-mono text-teal-300">C-00001 起編 (C-00001 ~ C-25000000)</span>
+              <span className="text-slate-400">公司自營不得轉讓 (63 席)</span>
+              <span className="font-mono text-amber-300 font-bold">A-00001 ~ A-00063 (單/雙軌起點永久鎖定)</span>
             </div>
             <div className="flex items-center justify-between py-2 border-b border-slate-800">
-              <span className="text-slate-400">雙軌定海神針絕對根節點</span>
-              <span className="font-mono text-amber-300 font-bold">C-25000001 (Binary Root, Depth = 0)</span>
-            </div>
-            <div className="flex items-center justify-between py-2 border-b border-slate-800">
-              <span className="text-slate-400">雙軌開局自營節點池</span>
-              <span className="font-mono text-slate-300">C-25000002 ~ C-25000514 (513 席，鎖定)</span>
+              <span className="text-slate-400">公司自營直推鏈結構</span>
+              <span className="font-mono text-slate-300">A-00001→…→A-00007 直推 A-00008~A-00063</span>
             </div>
             <div className="flex items-center justify-between py-2">
-              <span className="text-slate-400">第 6 代旗艦領袖直推錨點</span>
-              <span className="font-mono text-indigo-400">A-00001113 (親推全部 513 席開局自營)</span>
+              <span className="text-slate-400">對外開放建檔起點 (永吉家族)</span>
+              <span className="font-mono text-emerald-400 font-bold">A-00064 起 (A-00008 直推 A-00064~A-00068)</span>
             </div>
           </div>
         </div>

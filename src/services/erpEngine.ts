@@ -40,13 +40,15 @@ export const GLOBAL_BOUNDARIES = {
   SYSTEM_TARGET_MARKET: '台灣全齡人口 0~100 歲全民互助生態',
   CURRENCY_UNIT: '新台幣 (NTD)',
   RENTAL_FEE: 100, // 100 元/月/單位 = 100 點
-  MONOLINE_MID_RANGE: 'A-00000001 ~ A-25000000',
+  MONOLINE_MID_RANGE: 'A-00001 ~ A-25000000',
   BINARY_START_MID: 'A-25000001',
-  MONOLINE_NODE_RANGE: 'C-00000001 ~ C-25000000',
+  MONOLINE_NODE_RANGE: 'C-00001 ~ C-25000000',
   BINARY_ROOT_NODE_ID: 'C-25000001',
-  BINARY_START_POOL_RANGE: 'C-25000002 ~ C-25000514', // 513 席自營節點 (包含定海神針共514)
-  BINARY_START_POOL_COUNT: 514,
-  FLAGSHIP_SPONSOR_MID: 'A-00001113', // 第 6 代旗艦領袖
+  BINARY_START_POOL_RANGE: 'C-25000001 ~ C-25000063', // 63 席公司自營系統不得轉讓 (單雙軌起點)
+  BINARY_START_POOL_COUNT: 63,
+  HQ_LOCKED_MAX_SEQ: 63, // A-00001 ~ A-00063 公司自營系統不得轉讓
+  PUBLIC_OPEN_START_SEQ: 64, // A-00064 起對外開放
+  FLAGSHIP_SPONSOR_MID: 'A-00008', // 永吉家族直推起點 (公司自營 #08)
   TRIAL_SOFTWARE_QTY: 2,
   TRIAL_DAYS: 30,
 };
@@ -73,8 +75,8 @@ export class ERPEngine {
   private isHydratingFromServer: boolean = false;
   private skipNestedSync: boolean = false;
 
-  private currentMonolineCounter: number = 0; // 新會員入會從 A-00001 建檔 (0 -> 首位為 1)
-  private currentBinaryCounter: number = 25000514; // 開局池至 25000514
+  private currentMonolineCounter: number = 68; // A-00001~A-00063 公司自營不得轉讓；A-00064~A-00068 永吉家族已建檔
+  private currentBinaryCounter: number = 25000068; // C-25000001~C-25000063 公司自營；C-25000064 起對外開放
   private currentContactCounter: number = 0;
   private currentTrackingCounter: number = 0;
   private currentEventCounter: number = 0;
@@ -107,8 +109,8 @@ export class ERPEngine {
     this.bookingProfiles.clear();
     this.bookingAppointments.clear();
     this.settlements = [];
-    this.currentMonolineCounter = 0;
-    this.currentBinaryCounter = 25000514;
+    this.currentMonolineCounter = 63;
+    this.currentBinaryCounter = 25000063;
     this.currentContactCounter = 0;
     this.currentTrackingCounter = 0;
     this.currentEventCounter = 0;
@@ -147,8 +149,8 @@ export class ERPEngine {
       this.settlements = Array.isArray(snap.settlements) ? [...snap.settlements] : [];
 
       if (snap.counters) {
-        this.currentMonolineCounter = Number(snap.counters.currentMonolineCounter ?? 0);
-        this.currentBinaryCounter = Number(snap.counters.currentBinaryCounter ?? 25000514);
+        this.currentMonolineCounter = Math.max(63, Number(snap.counters.currentMonolineCounter ?? 63));
+        this.currentBinaryCounter = Math.max(25000063, Number(snap.counters.currentBinaryCounter ?? 25000063));
         this.currentContactCounter = Number(snap.counters.currentContactCounter ?? this.contacts.size);
         this.currentTrackingCounter = Number(snap.counters.currentTrackingCounter ?? this.contactTrackings.size);
         this.currentEventCounter = Number(snap.counters.currentEventCounter ?? this.events.size);
@@ -269,7 +271,10 @@ export class ERPEngine {
     const now = new Date();
     const trialExpireDate = new Date(now.getTime() + GLOBAL_BOUNDARIES.TRIAL_DAYS * 24 * 3600 * 1000);
 
-    // 1. 分配會員代號 (A-碼) 與單軌節點編號 (C-碼) - 從 A-00001 建檔起編
+    // 1. 分配會員代號 (A-碼) 與單軌節點編號 (C-碼) - A-00001~A-00063 為公司自營不得轉讓，A-00064 起對外開放
+    if (this.currentMonolineCounter < GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ) {
+      this.currentMonolineCounter = GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+    }
     this.currentMonolineCounter += 1;
     const monolineMid = `A-${String(this.currentMonolineCounter).padStart(5, '0')}`;
     const monolineNodeId = `C-${String(this.currentMonolineCounter).padStart(5, '0')}`;
@@ -277,7 +282,7 @@ export class ERPEngine {
       ? 'HQ_ROOT'
       : `C-${String(this.currentMonolineCounter - 1).padStart(5, '0')}`;
 
-    // 推薦人預設為旗艦領袖 A-00001113
+    // 推薦人預設為 A-00008 (公司自營 #08 · 永吉家族直推起點)
     const sponsorMid = params.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
 
     // 2. 建立【第一組 AI 軟體節點 (單軌公排)】
@@ -300,7 +305,10 @@ export class ERPEngine {
     };
     this.monolineNodes.set(monolineNodeId, monolineNode);
 
-    // 3. 建立【第二組 AI 軟體節點 (雙軌卡位分身)】
+    // 3. 建立【第二組 AI 軟體節點 (雙軌卡位分身，C-25000001 起，C-25000064 起對外開放)】
+    if (this.currentBinaryCounter < 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ) {
+      this.currentBinaryCounter = 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+    }
     this.currentBinaryCounter += 1;
     const binaryNodeId = `C-${String(this.currentBinaryCounter).padStart(8, '0')}`;
 

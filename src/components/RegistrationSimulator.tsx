@@ -374,7 +374,7 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
                   value={photoUrl}
                   onChange={(e) => setPhotoUrl(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono focus:outline-none focus:border-indigo-500"
-                  placeholder="https://images.unsplash.com/photo-..."
+                  placeholder="https://drive.google.com/thumbnail?sz=w800&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ"
                 />
               </div>
 
@@ -393,7 +393,7 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
                 <p className="text-[11px] text-slate-500 mt-1">
                   {lockedSponsorMid
                     ? `已鎖定為您的直推推薦碼 (${lockedSponsorMid})`
-                    : '預設為第 6 代旗艦領袖 A-00001113'}
+                    : '預設為公司自營對外直推首席 A-00008'}
                 </p>
               </div>
 

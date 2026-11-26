@@ -77,7 +77,7 @@ export const MemberLookupModal: React.FC<MemberLookupModalProps> = ({
           <form onSubmit={handleSearch} className="flex gap-2">
             <input
               type="text"
-              placeholder="輸入會員 MID (例：A-00001113) 或節點 C-碼 (例：C-25000001)..."
+              placeholder="輸入會員 MID (例：A-00064, A-00008) 或節點 C-碼 (例：C-25000001)..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
@@ -97,24 +97,24 @@ export const MemberLookupModal: React.FC<MemberLookupModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                setQuery('A-00001');
-                setResult(erpEngine.findMemberByMidOrNode('A-00001'));
+                setQuery('A-00064');
+                setResult(erpEngine.findMemberByMidOrNode('A-00064'));
                 setSearched(true);
               }}
               className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded font-mono text-emerald-300 cursor-pointer"
             >
-              A-00001 (首位新會員)
+              A-00064 (李永吉·對外首席)
             </button>
             <button
               type="button"
               onClick={() => {
-                setQuery('A-00001113');
-                setResult(erpEngine.findMemberByMidOrNode('A-00001113'));
+                setQuery('A-00008');
+                setResult(erpEngine.findMemberByMidOrNode('A-00008'));
                 setSearched(true);
               }}
               className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded font-mono text-indigo-300 cursor-pointer"
             >
-              A-00001113 (旗艦領袖)
+              A-00008 (總部對外直推首席)
             </button>
             <button
               type="button"

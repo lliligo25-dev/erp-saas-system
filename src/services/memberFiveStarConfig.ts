@@ -48,41 +48,41 @@ export interface IndustryPackMeta {
 }
 
 export const INDUSTRY_PACKS: IndustryPackMeta[] = [
-  { baseKey: 'CONTACT', title: '通訊錄 CRM', desc: '通訊主檔 + 聯繫追蹤日誌' },
-  { baseKey: 'EVENT', title: '活動行銷', desc: '活動企劃檔 + 現場花絮' },
+  { baseKey: 'CONTACT', title: '通訊錄系統', desc: '通訊錄系統 (親朋好友/公司/廠商/社團/宮廟) + 聯繫追蹤' },
+  { baseKey: 'EVENT', title: '活動花絮系統', desc: '活動花絮系統 (會議/展覽/聚餐/旅遊/其他)' },
   { baseKey: 'BOOKING', title: '個人預約系統', desc: '預約服務主檔 + 個人預約明細表單' },
   { baseKey: 'TODO', title: '代辦事項系統', desc: '代辦專案分類檔 + 待辦執行追蹤明細' },
-  { baseKey: 'ATOMY', title: '經銷組織會員', desc: '會員主檔 + 銷售與跟進' },
-  { baseKey: 'PRODUCT', title: '產銷商品訂單', desc: '產品主檔 + 訂單出貨紀錄' },
-  { baseKey: 'NAIL', title: '美甲沙龍預約', desc: '美甲會員檔 + 預約流水線' },
-  { baseKey: 'TCM', title: '推拿養生調理', desc: '推拿會員總表 + 推拿流水線' },
-  { baseKey: 'ELDER', title: '銀髮關懷照護', desc: '長者主檔 + 訪視紀錄' },
-  { baseKey: 'FRUIT', title: '生鮮蔬果產銷', desc: '水果品項檔 + 進銷存流水' },
-  { baseKey: 'GROCERY', title: '居家生鮮庫存', desc: '食材主檔 + 進出庫效期' },
-  { baseKey: 'ASSOC', title: '公會聯誼管理', desc: '聯誼會員檔 + 繳費與活動' },
+  { baseKey: 'ATOMY', title: '艾多美會員', desc: '艾多美會員主檔 (推薦人/安置人/左右線別) + 銷售跟進' },
+  { baseKey: 'ELDER', title: '長者關懷紀錄', desc: '長者關懷紀錄 (班別/班長/緊急電話/家屬) + 訪視紀錄' },
+  { baseKey: 'PRODUCT', title: '購物車產品', desc: '購物車產品主檔 (類別/價格/單位) + 訂單出貨紀錄' },
+  { baseKey: 'TCM', title: '推拿預約管理', desc: '推拿預約管理 (推拿師/部位症狀/處置) + 推拿流水線' },
+  { baseKey: 'FRUIT', title: '水果店管理', desc: '水果店管理 (單價/庫存/產地/供應商) + 進銷存流水' },
+  { baseKey: 'GROCERY', title: '家庭食材庫存 (FIFO)', desc: '家庭食材庫存 FIFO (存放位置/效期) + 進出庫紀錄' },
+  { baseKey: 'NAIL', title: '美甲醫美預約', desc: '美甲醫美預約 (美甲師/施作項目/預估金額) + 流水線' },
+  { baseKey: 'ASSOC', title: '大甲區中醫藥聯誼會', desc: '大甲區中醫藥聯誼會 (診所單位/職務/會費) + 繳費活動' },
 ];
 
 export const SYS_CONFIG: Record<string, SysModuleConfig> = {
   CONTACT_M: {
     key: 'CONTACT_M',
     baseKey: 'CONTACT',
-    name: '1. 通訊錄主檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋姓名、手機...',
-    catField: '狀態',
-    defaultCat: '活躍',
+    name: '1. 通訊錄系統',
+    iconColor: 'text-rose-600',
+    searchMsg: '🔍 搜尋姓名、手機、地址...',
+    catField: '類別',
+    defaultCat: '親朋好友',
     nameField: '姓名',
-    cats: ['活躍', '開通AI軟體1+1', '不常聯絡', '黑名單'],
+    cats: ['親朋好友', '公司', '廠商', '社團', '宮廟'],
     cardLine1: { label: '手機', key: '手機' },
     cardLine2: { label: '地址', key: '地址' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['活躍', '開通AI軟體1+1', '不常聯絡', '黑名單'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '手機', label: '手機', type: 'tel', half: true },
-      { id: '電話', label: '電話', type: 'tel', half: true },
-      { id: 'Line', label: 'Line ID', type: 'text', half: true },
-      { id: 'Email', label: 'Email', type: 'email', half: true },
-      { id: '地址', label: '地址', type: 'textarea' },
+      { id: '類別', label: '關係分類 👈*', type: 'select', icon: 'fa-sitemap text-info', options: ['親朋好友', '公司', '廠商', '社團', '宮廟'], required: true },
+      { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true },
+      { id: '手機', label: '📱 手機', type: 'tel' },
+      { id: '電話', label: '☎️ 電話', type: 'tel' },
+      { id: 'Line', label: '💬 Line ID', type: 'text' },
+      { id: 'Email', label: '✉️ Email', type: 'email' },
+      { id: '地址', label: '📍 地址', type: 'textarea' },
     ],
   },
   CONTACT_T: {
@@ -98,55 +98,53 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     cardLine1: { label: '聯繫日期', key: '聯繫日期' },
     cardLine2: { label: '聯繫方式', key: '聯繫方式' },
     fields: [
-      { id: '狀態', label: '目前狀態 *', type: 'select', options: ['跟進中', '開通體驗', '已洽談', '已結案', '待確認預約', '無效'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '聯繫日期', label: '聯繫日期', type: 'date', half: true },
-      { id: '聯繫方式', label: '聯繫方式', type: 'select', options: ['電話', 'Line', '面訪', 'Email', '線上開通', 'AI個人預約系統'], half: true },
-      { id: '洽談內容', label: '洽談內容', type: 'textarea' },
-      { id: '下一步計畫', label: '下一步計畫', type: 'textarea' },
+      { id: '狀態', label: '目前狀態 👈*', type: 'select', options: ['跟進中', '開通體驗', '已洽談', '已結案', '待確認預約', '無效'], required: true },
+      { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true },
+      { id: '聯繫日期', label: '📅 聯繫日期', type: 'date', half: true },
+      { id: '聯繫方式', label: '💬 聯繫方式', type: 'select', options: ['電話', 'Line', '面訪', 'Email', '線上開通', 'AI個人預約系統'], half: true },
+      { id: '洽談內容', label: '📝 洽談內容', type: 'textarea' },
+      { id: '下一步計畫', label: '📌 下一步計畫', type: 'textarea' },
     ],
   },
 
   EVENT_M: {
     key: 'EVENT_M',
     baseKey: 'EVENT',
-    name: '1. 活動企劃檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋活動主題...',
-    catField: '狀態',
-    defaultCat: '報名中',
+    name: '1. 活動花絮系統',
+    iconColor: 'text-emerald-600',
+    searchMsg: '🔍 搜尋主題、標題、地點...',
+    catField: '活動分類',
+    defaultCat: '會議',
     nameField: '活動主題',
-    cats: ['籌備中', '報名中', '進行中', '已結束'],
-    cardLine1: { label: '日期', key: '日期' },
-    cardLine2: { label: '地點', key: '地點' },
+    cats: ['會議', '展覽', '聚餐', '旅遊', '其他'],
+    cardLine1: { label: '照片標題', key: '照片標題' },
+    cardLine2: { label: '拍攝地點', key: '拍攝地點' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['籌備中', '報名中', '進行中', '已結束'], required: true },
-      { id: '活動主題', label: '活動主題 *', type: 'text', required: true },
-      { id: '日期', label: '日期', type: 'date', half: true },
-      { id: '負責人', label: '負責人', type: 'text', half: true },
-      { id: '預算', label: '預算', type: 'number', half: true },
-      { id: '地點', label: '地點', type: 'text', half: true },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '活動分類', label: '活動分類 👈*', type: 'select', icon: 'fa-sitemap text-info', options: ['會議', '展覽', '聚餐', '旅遊', '其他'], required: true },
+      { id: '活動主題', label: '📌 活動主題 👈*', type: 'text', required: true },
+      { id: '照片標題', label: '📷 照片標題', type: 'text' },
+      { id: '拍攝地點', label: '📍 拍攝地點', type: 'text' },
+      { id: '備註', label: '📝 備註', type: 'textarea' },
     ],
   },
   EVENT_T: {
     key: 'EVENT_T',
     baseKey: 'EVENT',
-    name: '2. 活動花絮',
+    name: '2. 活動花絮明細',
     iconColor: 'text-emerald-600',
-    searchMsg: '🔍 搜尋照片標題...',
-    catField: '狀態',
-    defaultCat: '公開發布',
+    searchMsg: '🔍 搜尋主題、標題、地點...',
+    catField: '活動分類',
+    defaultCat: '會議',
     nameField: '活動主題',
-    cats: ['審核中', '公開發布', '已發布'],
+    cats: ['會議', '展覽', '聚餐', '旅遊', '其他'],
     cardLine1: { label: '照片標題', key: '照片標題' },
     cardLine2: { label: '拍攝地點', key: '拍攝地點' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['審核中', '公開發布', '已發布'], required: true },
-      { id: '活動主題', label: '活動主題 *', type: 'text', required: true },
-      { id: '照片標題', label: '照片標題', type: 'text', half: true },
-      { id: '拍攝地點', label: '拍攝地點', type: 'text', half: true },
-      { id: '內容備註', label: '內容備註', type: 'textarea' },
+      { id: '活動分類', label: '活動分類 👈*', type: 'select', icon: 'fa-sitemap text-info', options: ['會議', '展覽', '聚餐', '旅遊', '其他'], required: true },
+      { id: '活動主題', label: '📌 活動主題 👈*', type: 'text', required: true },
+      { id: '照片標題', label: '📷 照片標題', type: 'text' },
+      { id: '拍攝地點', label: '📍 拍攝地點', type: 'text' },
+      { id: '備註', label: '📝 備註', type: 'textarea' },
     ],
   },
 
@@ -246,24 +244,25 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
   ATOMY_M: {
     key: 'ATOMY_M',
     baseKey: 'ATOMY',
-    name: '1. 會員主檔',
+    name: '1. 艾多美會員',
     iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋姓名、會員編號...',
-    catField: '狀態',
+    searchMsg: '🔍 搜尋姓名、編號、推薦人...',
+    catField: '經營狀態',
     defaultCat: '愛用者',
     nameField: '姓名',
     cats: ['經營者', '愛用者', '潛在對象', '停止活動'],
     cardLine1: { label: '會員編號', key: '會員編號' },
     cardLine2: { label: '線別', key: '線別' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['經營者', '愛用者', '潛在對象', '停止活動'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '會員編號', label: '會員編號', type: 'text', half: true },
-      { id: '手機', label: '手機', type: 'tel', half: true },
-      { id: 'Line', label: 'Line ID', type: 'text', half: true },
-      { id: '推薦人', label: '推薦人', type: 'text', half: true },
-      { id: '線別', label: '線別(左/右)', type: 'text' },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '經營狀態', label: '經營狀態 👈*', type: 'select', icon: 'fa-project-diagram text-info', options: ['經營者', '愛用者', '潛在對象', '停止活動'], required: true },
+      { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true },
+      { id: '會員編號', label: '🔑 會員編號', type: 'text', half: true },
+      { id: '手機', label: '📱 手機', type: 'tel', half: true },
+      { id: 'Line', label: '💬 Line ID', type: 'text' },
+      { id: '推薦人', label: '🤝 推薦人', type: 'text', half: true },
+      { id: '安置人', label: '⬇️ 安置人', type: 'text', half: true },
+      { id: '線別', label: '🌿 線別(左/右)', type: 'text' },
+      { id: '備註與需求', label: '📝 備註與需求', type: 'textarea' },
     ],
   },
   ATOMY_T: {
@@ -279,37 +278,37 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     cardLine1: { label: '消費項目', key: '消費項目' },
     cardLine2: { label: '消費金額', key: '消費金額' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['跟進中', '已成交', '無效'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '跟進日期', label: '跟進日期', type: 'date', half: true },
-      { id: '消費項目', label: '消費項目', type: 'text', half: true },
-      { id: '消費金額', label: '消費金額', type: 'number', half: true },
-      { id: '需求備註', label: '需求備註', type: 'textarea' },
+      { id: '狀態', label: '狀態 👈*', type: 'select', options: ['跟進中', '已成交', '無效'], required: true },
+      { id: '姓名', label: '👤 姓名 👈*', type: 'text', required: true },
+      { id: '跟進日期', label: '📅 跟進日期', type: 'date', half: true },
+      { id: '消費項目', label: '🛒 消費項目', type: 'text', half: true },
+      { id: '消費金額', label: '💲 消費金額', type: 'number', half: true },
+      { id: '需求備註', label: '📝 需求備註', type: 'textarea' },
     ],
   },
 
   ELDER_M: {
     key: 'ELDER_M',
     baseKey: 'ELDER',
-    name: '1. 長者主檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋姓名、班別...',
-    catField: '狀態',
-    defaultCat: '關懷中',
+    name: '1. 長者關懷紀錄',
+    iconColor: 'text-amber-600',
+    searchMsg: '🔍 搜尋長者姓名、班別...',
+    catField: '所屬班別',
+    defaultCat: '一班',
     nameField: '姓名',
-    cats: ['關懷中', '結案'],
-    cardLine1: { label: '手機', key: '手機' },
-    cardLine2: { label: '班別', key: '班別' },
+    cats: ['一班', '二班', '三班', '關懷中', '結案'],
+    cardLine1: { label: '長者手機', key: '長者手機' },
+    cardLine2: { label: '關懷進度', key: '關懷進度' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['關懷中', '結案'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '編號', label: '編號', type: 'text', half: true },
-      { id: '手機', label: '手機', type: 'tel', half: true },
-      { id: '班別', label: '班別', type: 'text', half: true },
-      { id: '緊急電話', label: '緊急電話', type: 'tel', half: true },
-      { id: '家屬', label: '家屬聯絡', type: 'text' },
-      { id: '地址', label: '地址', type: 'text' },
-      { id: '健康備註', label: '健康備註', type: 'textarea' },
+      { id: '所屬班別', label: '所屬班別 👈*', type: 'select', icon: 'fa-users text-info', options: ['一班', '二班', '三班', '關懷中', '結案'], required: true },
+      { id: '姓名', label: '👤 長者姓名 👈*', type: 'text', required: true },
+      { id: '長者編號', label: '🔑 長者編號', type: 'text', half: true },
+      { id: '長者手機', label: '📱 長者手機', type: 'tel', half: true },
+      { id: '班長', label: '⭐ 班長', type: 'text', half: true },
+      { id: '緊急電話', label: '☎️ 緊急電話', type: 'tel', half: true },
+      { id: '家屬聯絡人', label: '👨‍👩‍👧‍👦 家屬聯絡人', type: 'text' },
+      { id: '關懷進度', label: '📈 關懷進度', type: 'text' },
+      { id: '健康與備註', label: '❤️ 健康與備註', type: 'textarea' },
     ],
   },
   ELDER_T: {
@@ -325,35 +324,33 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     cardLine1: { label: '訪視日期', key: '訪視日期' },
     cardLine2: { label: '健康數據', key: '健康數據' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['待訪視', '已訪視', '異常追蹤'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '訪視日期', label: '訪視日期', type: 'date', half: true },
-      { id: '健康數據', label: '健康數據(血壓等)', type: 'text', half: true },
-      { id: '關懷內容', label: '關懷內容', type: 'textarea' },
-      { id: '後續追蹤', label: '後續追蹤', type: 'textarea' },
+      { id: '狀態', label: '狀態 👈*', type: 'select', options: ['待訪視', '已訪視', '異常追蹤'], required: true },
+      { id: '姓名', label: '👤 長者姓名 👈*', type: 'text', required: true },
+      { id: '訪視日期', label: '📅 訪視日期', type: 'date', half: true },
+      { id: '健康數據', label: '❤️ 健康數據(血壓等)', type: 'text', half: true },
+      { id: '關懷內容', label: '📝 關懷內容', type: 'textarea' },
+      { id: '後續追蹤', label: '📈 後續追蹤', type: 'textarea' },
     ],
   },
 
   PRODUCT_M: {
     key: 'PRODUCT_M',
     baseKey: 'PRODUCT',
-    name: '1. 產品主檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋品名...',
-    catField: '狀態',
-    defaultCat: '上架中',
+    name: '1. 購物車產品',
+    iconColor: 'text-sky-600',
+    searchMsg: '🔍 搜尋品名、類別...',
+    catField: '類別',
+    defaultCat: '保健食品',
     nameField: '品名',
-    cats: ['上架中', '已下架'],
+    cats: ['保健食品', '美容保養', '生活用品', '食品', '其他'],
     cardLine1: { label: '價格', key: '價格' },
-    cardLine2: { label: '庫存', key: '庫存' },
+    cardLine2: { label: '單位', key: '單位' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['上架中', '已下架'], required: true },
-      { id: '品名', label: '品名 *', type: 'text', required: true },
-      { id: '類別', label: '類別', type: 'text', half: true },
-      { id: '價格', label: '價格', type: 'number', half: true },
-      { id: '單位', label: '單位', type: 'text', half: true },
-      { id: '庫存', label: '庫存', type: 'number', half: true },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '類別', label: '產品類別 👈*', type: 'select', icon: 'fa-tags text-info', options: ['保健食品', '美容保養', '生活用品', '食品', '其他'], required: true },
+      { id: '品名', label: '🛒 品名 👈*', type: 'text', required: true },
+      { id: '價格', label: '💲 價格', type: 'number', half: true },
+      { id: '單位', label: '📦 單位', type: 'text', half: true },
+      { id: '備註', label: '📝 產品備註', type: 'textarea' },
     ],
   },
   PRODUCT_T: {
@@ -369,38 +366,37 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     cardLine1: { label: '品名', key: '品名' },
     cardLine2: { label: '總金額', key: '總金額' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['待處理', '已出貨', '已完成', '已結案', '取消'], required: true },
-      { id: '姓名', label: '客戶姓名 *', type: 'text', required: true },
-      { id: '品名', label: '品名', type: 'text', half: true },
-      { id: '數量', label: '數量', type: 'number', half: true },
-      { id: '總金額', label: '總金額', type: 'number', half: true },
-      { id: '寄送地址', label: '寄送地址', type: 'text' },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '狀態', label: '狀態 👈*', type: 'select', options: ['待處理', '已出貨', '已完成', '已結案', '取消'], required: true },
+      { id: '姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true },
+      { id: '品名', label: '🛒 品名', type: 'text', half: true },
+      { id: '數量', label: '🧮 數量', type: 'number', half: true },
+      { id: '總金額', label: '💲 總金額', type: 'number', half: true },
+      { id: '寄送地址', label: '📍 寄送地址', type: 'text' },
+      { id: '備註', label: '📝 備註', type: 'textarea' },
     ],
   },
 
   FRUIT_M: {
     key: 'FRUIT_M',
     baseKey: 'FRUIT',
-    name: '1. 水果品項檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋水果品名...',
-    catField: '狀態',
-    defaultCat: '販售中',
+    name: '1. 水果店管理',
+    iconColor: 'text-rose-600',
+    searchMsg: '🔍 搜尋品名、產地、供應商...',
+    catField: '類別',
+    defaultCat: '當季水果',
     nameField: '品名',
-    cats: ['販售中', '已斷貨'],
+    cats: ['當季水果', '進口水果', '禮盒包裝', '促銷特賣', '已斷貨'],
     cardLine1: { label: '單價', key: '單價' },
     cardLine2: { label: '產地', key: '產地' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['販售中', '已斷貨'], required: true },
-      { id: '品名', label: '品名 *', type: 'text', required: true },
-      { id: '類別', label: '類別', type: 'text', half: true },
-      { id: '單價', label: '單價', type: 'number', half: true },
-      { id: '單位', label: '單位', type: 'text', half: true },
-      { id: '庫存量', label: '庫存量', type: 'number', half: true },
-      { id: '產地', label: '產地', type: 'text', half: true },
-      { id: '供應商', label: '供應商', type: 'text' },
-      { id: '備註', label: '備註(成熟度等)', type: 'textarea' },
+      { id: '類別', label: '目前分類 👈*', type: 'select', icon: 'fa-tags text-info', options: ['當季水果', '進口水果', '禮盒包裝', '促銷特賣', '已斷貨'], required: true },
+      { id: '品名', label: '🍎 品名 👈*', type: 'text', required: true },
+      { id: '單價', label: '💲 單價', type: 'number', half: true },
+      { id: '單位', label: '📦 單位', type: 'text', half: true },
+      { id: '庫存量', label: '🧮 庫存量', type: 'number', half: true },
+      { id: '產地', label: '🌍 產地', type: 'text', half: true },
+      { id: '供應商', label: '🚚 供應商', type: 'text' },
+      { id: '備註', label: '📝 備註 (成熟度等)', type: 'textarea' },
     ],
   },
   FRUIT_T: {
@@ -416,35 +412,38 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     cardLine1: { label: '數量', key: '數量' },
     cardLine2: { label: '總金額', key: '總金額' },
     fields: [
-      { id: '狀態', label: '交易類別 *', type: 'select', options: ['進貨', '賣出', '報廢'], required: true },
-      { id: '品名', label: '品名 *', type: 'text', required: true },
-      { id: '日期', label: '日期', type: 'date', half: true },
-      { id: '數量', label: '數量', type: 'number', half: true },
-      { id: '總金額', label: '總金額', type: 'number', half: true },
-      { id: '經手人', label: '經手人', type: 'text', half: true },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '狀態', label: '交易類別 👈*', type: 'select', options: ['進貨', '賣出', '報廢'], required: true },
+      { id: '品名', label: '🍎 品名 👈*', type: 'text', required: true },
+      { id: '日期', label: '📅 日期', type: 'date', half: true },
+      { id: '數量', label: '🧮 數量', type: 'number', half: true },
+      { id: '總金額', label: '💲 總金額', type: 'number', half: true },
+      { id: '經手人', label: '👤 經手人', type: 'text', half: true },
+      { id: '備註', label: '📝 備註', type: 'textarea' },
     ],
   },
 
   GROCERY_M: {
     key: 'GROCERY_M',
     baseKey: 'GROCERY',
-    name: '1. 食材主檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋食材品名...',
+    name: '1. 家庭食材庫存 (FIFO)',
+    iconColor: 'text-emerald-600',
+    searchMsg: '🔍 搜尋品名、存放位置、類別...',
     catField: '狀態',
-    defaultCat: '常備品',
+    defaultCat: '庫存中',
     nameField: '品名',
-    cats: ['常備品', '偶爾買'],
-    cardLine1: { label: '預設位置', key: '預設位置' },
-    cardLine2: { label: '單位', key: '單位' },
+    cats: ['庫存中', '快過期', '已吃完', '過期丟棄'],
+    cardLine1: { label: '存放位置', key: '存放位置' },
+    cardLine2: { label: '有效期限', key: '有效期限' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['常備品', '偶爾買'], required: true },
-      { id: '品名', label: '品名 *', type: 'text', required: true },
-      { id: '類別', label: '類別', type: 'select', options: ['生鮮肉品', '蔬菜水果', '冷凍食品', '乾貨零食', '飲料乳品', '生活日用'], half: true },
-      { id: '預設位置', label: '預設位置', type: 'select', options: ['冷藏', '冷凍', '常溫層', '零食櫃', '儲藏室'], half: true },
-      { id: '單位', label: '單位', type: 'text', half: true },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '狀態', label: '目前狀態 👈*', type: 'select', icon: 'fa-clipboard-check text-info', options: ['庫存中', '快過期', '已吃完', '過期丟棄'], required: true },
+      { id: '品名', label: '🛒 物品名稱 👈*', type: 'text', required: true },
+      { id: '物品類別', label: '🏷️ 物品類別', type: 'select', options: ['生鮮肉品', '蔬菜水果', '冷凍食品', '乾貨零食', '飲料乳品', '生活日用'], half: true },
+      { id: '存放位置', label: '📍 存放位置', type: 'select', options: ['冷藏', '冷凍', '常溫層', '零食櫃', '儲藏室'], half: true },
+      { id: '數量', label: '🧮 數量', type: 'number', half: true },
+      { id: '單位', label: '📦 單位 (包/盒/瓶)', type: 'text', half: true },
+      { id: '購買日期', label: '📥 入庫(購買)日期', type: 'date', half: true },
+      { id: '有效期限', label: '⏳ 有效期限 (FIFO)', type: 'date', half: true },
+      { id: '備註', label: '📝 備註 (料理方式等)', type: 'textarea' },
     ],
   },
   GROCERY_T: {
@@ -460,36 +459,38 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     cardLine1: { label: '有效期限', key: '有效期限' },
     cardLine2: { label: '數量', key: '數量' },
     fields: [
-      { id: '狀態', label: '動向 *', type: 'select', options: ['入庫', '出庫/吃完', '過期丟棄'], required: true },
-      { id: '品名', label: '品名 *', type: 'text', required: true },
-      { id: '購買日期', label: '購買日期', type: 'date', half: true },
-      { id: '有效期限', label: '有效期限', type: 'date', half: true },
-      { id: '數量', label: '數量', type: 'number', half: true },
-      { id: '處理方式', label: '處理方式', type: 'text', half: true },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '狀態', label: '動向 👈*', type: 'select', options: ['入庫', '出庫/吃完', '過期丟棄'], required: true },
+      { id: '品名', label: '🛒 物品名稱 👈*', type: 'text', required: true },
+      { id: '購買日期', label: '📥 購買日期', type: 'date', half: true },
+      { id: '有效期限', label: '⏳ 有效期限', type: 'date', half: true },
+      { id: '數量', label: '🧮 數量', type: 'number', half: true },
+      { id: '處理方式', label: '🍳 處理方式', type: 'text', half: true },
+      { id: '備註', label: '📝 備註', type: 'textarea' },
     ],
   },
 
   NAIL_M: {
     key: 'NAIL_M',
     baseKey: 'NAIL',
-    name: '1. 美甲會員檔',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋美甲會員姓名...',
+    name: '1. 美甲醫美預約',
+    iconColor: 'text-rose-600',
+    searchMsg: '🔍 搜尋姓名、手機、美甲師...',
     catField: '狀態',
-    defaultCat: '活躍會員',
-    nameField: '姓名',
-    cats: ['活躍會員', '久未回店'],
-    cardLine1: { label: '手機', key: '手機' },
-    cardLine2: { label: '偏好款式', key: '偏好款式' },
+    defaultCat: '預約中',
+    nameField: '客戶姓名',
+    cats: ['預約中', '已報到', '施作中', '已完成', '取消'],
+    cardLine1: { label: '預約日期', key: '預約日期' },
+    cardLine2: { label: '施作項目', key: '施作項目' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['活躍會員', '久未回店'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '手機', label: '手機', type: 'tel', half: true },
-      { id: '性別', label: '性別', type: 'select', options: ['女', '男'], half: true },
-      { id: '生日', label: '生日', type: 'date', half: true },
-      { id: '偏好款式', label: '偏好款式', type: 'text', half: true },
-      { id: '備註', label: '備註(過敏史等)', type: 'textarea' },
+      { id: '狀態', label: '目前狀態 👈*', type: 'select', icon: 'fa-calendar-check text-info', options: ['預約中', '已報到', '施作中', '已完成', '取消'], required: true },
+      { id: '客戶姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true },
+      { id: '手機', label: '📱 手機', type: 'tel', half: true },
+      { id: '指定美甲師', label: '💅 指定美甲師', type: 'text', half: true },
+      { id: '預約日期', label: '📅 預約日期', type: 'date', half: true },
+      { id: '預約時段', label: '⏰ 時間', type: 'time', half: true },
+      { id: '施作項目', label: '✨ 施作項目', type: 'select', options: ['手部單色', '足部單色', '造型設計', '卸甲重作', '深層保養', '其他'], half: true },
+      { id: '預估金額', label: '💲 預估金額', type: 'number', half: true },
+      { id: '備註與需求', label: '📝 備註 (想做的款式/特殊需求)', type: 'textarea' },
     ],
   },
   NAIL_T: {
@@ -500,43 +501,45 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     searchMsg: '🔍 搜尋美甲預約...',
     catField: '狀態',
     defaultCat: '預約中',
-    nameField: '姓名',
-    cats: ['預約中', '施作中', '已完成', '取消'],
+    nameField: '客戶姓名',
+    cats: ['預約中', '已報到', '施作中', '已完成', '取消'],
     cardLine1: { label: '預約日期', key: '預約日期' },
     cardLine2: { label: '指定美甲師', key: '指定美甲師' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['預約中', '施作中', '已完成', '取消'], required: true },
-      { id: '姓名', label: '客戶姓名 *', type: 'text', required: true },
-      { id: '預約日期', label: '預約日期', type: 'date', half: true },
-      { id: '預約時段', label: '預約時段', type: 'time', half: true },
-      { id: '指定美甲師', label: '指定美甲師', type: 'text', half: true },
-      { id: '施作項目', label: '施作項目', type: 'select', options: ['手部單色', '足部單色', '造型設計', '卸甲保養'], half: true },
-      { id: '開始時間', label: '開始時間', type: 'datetime-local', half: true },
-      { id: '結束時間', label: '結束時間', type: 'datetime-local', half: true },
-      { id: '消費金額', label: '消費金額', type: 'number', half: true },
+      { id: '狀態', label: '目前狀態 👈*', type: 'select', options: ['預約中', '已報到', '施作中', '已完成', '取消'], required: true },
+      { id: '客戶姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true },
+      { id: '預約日期', label: '📅 預約日期', type: 'date', half: true },
+      { id: '預約時段', label: '⏰ 時間', type: 'time', half: true },
+      { id: '指定美甲師', label: '💅 指定美甲師', type: 'text', half: true },
+      { id: '施作項目', label: '✨ 施作項目', type: 'select', options: ['手部單色', '足部單色', '造型設計', '卸甲重作', '深層保養', '其他'], half: true },
+      { id: '開始時間', label: '▶️ 開始時間', type: 'datetime-local', half: true },
+      { id: '結束時間', label: '⏹️ 結束時間', type: 'datetime-local', half: true },
+      { id: '消費金額', label: '💲 消費金額', type: 'number', half: true },
     ],
   },
 
   ASSOC_M: {
     key: 'ASSOC_M',
     baseKey: 'ASSOC',
-    name: '1. 聯誼會員檔',
+    name: '1. 大甲區中醫藥聯誼會',
     iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋診所/單位...',
-    catField: '狀態',
+    searchMsg: '🔍 搜尋診所、負責人、職務...',
+    catField: '會籍狀態',
     defaultCat: '正常會員',
-    nameField: '單位名稱',
-    cats: ['正常會員', '理監事', '停權/退會'],
-    cardLine1: { label: '負責人', key: '負責人' },
-    cardLine2: { label: '職務', key: '職務' },
+    nameField: '診所與單位',
+    cats: ['正常會員', '理監事', '榮譽會員', '停權/退會'],
+    cardLine1: { label: '負責人姓名', key: '負責人姓名' },
+    cardLine2: { label: '繳費狀態', key: '繳費狀態' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['正常會員', '理監事', '停權/退會'], required: true },
-      { id: '單位名稱', label: '診所/單位 *', type: 'text', required: true },
-      { id: '負責人', label: '負責人', type: 'text', half: true },
-      { id: '手機', label: '手機', type: 'tel', half: true },
-      { id: '職務', label: '職務', type: 'text', half: true },
-      { id: '入會年', label: '入會年(西元)', type: 'number', half: true },
-      { id: '地址', label: '地址', type: 'textarea' },
+      { id: '會籍狀態', label: '會籍狀態 👈*', type: 'select', icon: 'fa-id-card text-info', options: ['正常會員', '理監事', '榮譽會員', '停權/退會'], required: true },
+      { id: '診所與單位', label: '🏥 診所/單位名稱 👈*', type: 'text', required: true },
+      { id: '負責人姓名', label: '👤 負責人/代表姓名', type: 'text', half: true },
+      { id: '手機', label: '📱 聯絡手機', type: 'tel', half: true },
+      { id: '擔任職務', label: '🎖️ 擔任職務', type: 'select', options: ['一般會員', '會長', '副會長', '理事長', '常務理事', '理事', '常務監事', '監事', '總幹事', '財務'], half: true },
+      { id: '繳費狀態', label: '💰 會費繳納狀態', type: 'select', options: ['本年度已繳', '未繳費', '免繳'], half: true },
+      { id: '入會年份', label: '📅 入會年份(西元)', type: 'number', half: true },
+      { id: '單位地址', label: '📍 單位地址', type: 'text', half: false },
+      { id: '備註', label: '📝 備註 (專長/備用電話等)', type: 'textarea' },
     ],
   },
   ASSOC_T: {
@@ -547,39 +550,42 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     searchMsg: '🔍 搜尋繳費紀錄...',
     catField: '狀態',
     defaultCat: '未繳',
-    nameField: '單位名稱',
+    nameField: '診所與單位',
     cats: ['未繳', '已繳', '已完成', '已參加'],
     cardLine1: { label: '年度', key: '年度' },
     cardLine2: { label: '金額', key: '金額' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['未繳', '已繳', '已完成', '已參加'], required: true },
-      { id: '單位名稱', label: '診所/單位 *', type: 'text', required: true },
-      { id: '年度', label: '年度', type: 'text', half: true },
-      { id: '繳費項目', label: '項目(會費/聚餐)', type: 'text', half: true },
-      { id: '金額', label: '金額', type: 'number', half: true },
-      { id: '備註', label: '備註', type: 'textarea' },
+      { id: '狀態', label: '狀態 👈*', type: 'select', options: ['未繳', '已繳', '已完成', '已參加'], required: true },
+      { id: '診所與單位', label: '🏥 診所/單位名稱 👈*', type: 'text', required: true },
+      { id: '年度', label: '📅 年度', type: 'text', half: true },
+      { id: '繳費項目', label: '💰 項目(會費/聚餐)', type: 'text', half: true },
+      { id: '金額', label: '💲 金額', type: 'number', half: true },
+      { id: '備註', label: '📝 備註', type: 'textarea' },
     ],
   },
 
   TCM_M: {
     key: 'TCM_M',
     baseKey: 'TCM',
-    name: '1. 推拿會員總表',
-    iconColor: 'text-blue-600',
-    searchMsg: '🔍 搜尋推拿會員姓名、手機...',
+    name: '1. 推拿預約管理',
+    iconColor: 'text-emerald-600',
+    searchMsg: '🔍 搜尋姓名、手機、推拿師...',
     catField: '狀態',
-    defaultCat: '活躍會員',
-    nameField: '姓名',
-    cats: ['活躍會員', '久未回診', '黑名單'],
-    cardLine1: { label: '手機', key: '手機' },
-    cardLine2: { label: '生日', key: '生日' },
+    defaultCat: '預約中',
+    nameField: '客戶姓名',
+    cats: ['預約中', '初診', '複診', '已完成', '取消'],
+    cardLine1: { label: '預約日期', key: '預約日期' },
+    cardLine2: { label: '負責推拿師', key: '負責推拿師' },
     fields: [
-      { id: '狀態', label: '會員狀態 *', type: 'select', options: ['活躍會員', '久未回診', '黑名單'], required: true },
-      { id: '姓名', label: '姓名 *', type: 'text', required: true },
-      { id: '手機', label: '手機', type: 'tel', half: true },
-      { id: '性別', label: '性別', type: 'select', options: ['男', '女', '其他'], half: true },
-      { id: '生日', label: '生日', type: 'date', half: true },
-      { id: '病史與備註', label: '病史與身體狀況', type: 'textarea' },
+      { id: '狀態', label: '目前狀態 👈*', type: 'select', icon: 'fa-calendar-check text-info', options: ['預約中', '初診', '複診', '已完成', '取消'], required: true },
+      { id: '客戶姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true },
+      { id: '手機', label: '📱 手機', type: 'tel', half: true },
+      { id: '性別', label: '⚥ 性別', type: 'select', options: ['男', '女', '其他'], half: true },
+      { id: '預約日期', label: '📅 預約日期', type: 'date', half: true },
+      { id: '預約時段', label: '⏰ 時間', type: 'time', half: true },
+      { id: '負責推拿師', label: '👨‍⚕️ 負責推拿師', type: 'text' },
+      { id: '部位與症狀', label: '🤕 部位與症狀', type: 'textarea' },
+      { id: '處置與備註', label: '📝 處置與備註', type: 'textarea' },
     ],
   },
   TCM_T: {
@@ -590,22 +596,22 @@ export const SYS_CONFIG: Record<string, SysModuleConfig> = {
     searchMsg: '🔍 搜尋姓名、推拿師...',
     catField: '狀態',
     defaultCat: '預約中',
-    nameField: '姓名',
+    nameField: '客戶姓名',
     cats: ['預約中', '執行中', '已完成', '取消'],
     cardLine1: { label: '預約日期', key: '預約日期' },
     cardLine2: { label: '負責推拿師', key: '負責推拿師' },
     fields: [
-      { id: '狀態', label: '狀態 *', type: 'select', options: ['預約中', '執行中', '已完成', '取消'], required: true },
-      { id: '姓名', label: '客戶姓名 *', type: 'text', required: true },
-      { id: '預約日期', label: '預約日期', type: 'date', half: true },
-      { id: '預約時段', label: '預約時段', type: 'time', half: true },
-      { id: '負責推拿師', label: '負責推拿師', type: 'select', options: ['李永吉', '李佳馨'], half: true },
-      { id: '施作項目', label: '施作項目', type: 'select', options: ['全身推拿', '半身', '腳底', '拔罐', '其他'], half: true },
-      { id: '服務節數', label: '服務節數', type: 'select', options: ['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '3.5', '4.0', '4.5', '5.0'], half: true },
-      { id: '開始時間', label: '開始時間', type: 'datetime-local', half: true },
-      { id: '結束時間', label: '結束時間', type: 'datetime-local', half: true },
-      { id: '消費金額', label: '消費金額', type: 'number', half: true },
-      { id: '處置與備註', label: '處置與備註', type: 'textarea' },
+      { id: '狀態', label: '狀態 👈*', type: 'select', options: ['預約中', '執行中', '已完成', '取消'], required: true },
+      { id: '客戶姓名', label: '👤 客戶姓名 👈*', type: 'text', required: true },
+      { id: '預約日期', label: '📅 預約日期', type: 'date', half: true },
+      { id: '預約時段', label: '⏰ 時間', type: 'time', half: true },
+      { id: '負責推拿師', label: '👨‍⚕️ 負責推拿師', type: 'select', options: ['李永吉', '李佳馨'], half: true },
+      { id: '施作項目', label: '💆 施作項目', type: 'select', options: ['全身推拿', '半身', '腳底', '拔罐', '其他'], half: true },
+      { id: '服務節數', label: '⏱️ 服務節數', type: 'select', options: ['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '3.5', '4.0', '4.5', '5.0'], half: true },
+      { id: '開始時間', label: '▶️ 開始時間', type: 'datetime-local', half: true },
+      { id: '結束時間', label: '⏹️ 結束時間', type: 'datetime-local', half: true },
+      { id: '消費金額', label: '💲 消費金額', type: 'number', half: true },
+      { id: '處置與備註', label: '📝 處置與備註', type: 'textarea' },
     ],
   },
 };
@@ -641,8 +647,8 @@ function createDefaultSeedForModule(sysType: string, memberMid: string): Dynamic
   switch (sysType) {
     case 'ATOMY_M':
       return [
-        { ID: 'ATM-001', 狀態: '經營者', 姓名: '林佳穎', 會員編號: 'AT-88201', 手機: '0911-223-344', Line: 'jiaying_lin', 推薦人: memberMid, 線別: '左線 A 區', 備註: '每月固定回購蜂蜜飲與益生菌', 更新時間: nowStr },
-        { ID: 'ATM-002', 狀態: '愛用者', 姓名: '陳志強', 會員編號: 'AT-88202', 手機: '0928-445-566', Line: 'chiang_chen', 推薦人: memberMid, 線別: '右線 B 區', 備註: '偏好生活日用品與口腔護理組', 更新時間: nowStr },
+        { ID: 'ATM-001', 經營狀態: '經營者', 姓名: '林佳穎', 會員編號: 'AT-88201', 手機: '0911-223-344', Line: 'jiaying_lin', 推薦人: memberMid, 安置人: memberMid, 線別: '左線 A 區', 備註與需求: '每月固定回購蜂蜜飲與益生菌', 更新時間: nowStr },
+        { ID: 'ATM-002', 經營狀態: '愛用者', 姓名: '陳志強', 會員編號: 'AT-88202', 手機: '0928-445-566', Line: 'chiang_chen', 推薦人: memberMid, 安置人: memberMid, 線別: '右線 B 區', 備註與需求: '偏好生活日用品與口腔護理組', 更新時間: nowStr },
       ];
     case 'ATOMY_T':
       return [
@@ -651,8 +657,8 @@ function createDefaultSeedForModule(sysType: string, memberMid: string): Dynamic
       ];
     case 'PRODUCT_M':
       return [
-        { ID: 'PRM-001', 狀態: '上架中', 品名: 'AI 產銷合一智聯健康飲禮盒', 類別: '保健食品', 價格: '1980', 單位: '盒', 庫存: '45', 備註: '會員體驗組熱銷第一名', 更新時間: nowStr },
-        { ID: 'PRM-002', 狀態: '上架中', 品名: '頂級冷壓初榨植萃油', 類別: '居家生鮮', 價格: '960', 單位: '瓶', 庫存: '30', 備註: '產地直送溯源認證', 更新時間: nowStr },
+        { ID: 'PRM-001', 類別: '保健食品', 品名: 'AI 產銷合一智聯健康飲禮盒', 價格: '1980', 單位: '盒', 備註: '會員體驗組熱銷第一名', 更新時間: nowStr },
+        { ID: 'PRM-002', 類別: '食品', 品名: '頂級冷壓初榨植萃油', 價格: '960', 單位: '瓶', 備註: '產地直送溯源認證', 更新時間: nowStr },
       ];
     case 'PRODUCT_T':
       return [
@@ -661,24 +667,24 @@ function createDefaultSeedForModule(sysType: string, memberMid: string): Dynamic
       ];
     case 'TCM_M':
       return [
-        { ID: 'TCM-001', 狀態: '活躍會員', 姓名: '吳明宏', 手機: '0932-112-889', 性別: '男', 生日: '1978-05-14', 病史與備註: '長期久坐肩頸痠痛，偏好深層指壓', 更新時間: nowStr },
+        { ID: 'TCM-001', 狀態: '預約中', 客戶姓名: '吳明宏', 手機: '0932-112-889', 性別: '男', 預約日期: today, 預約時段: '15:00', 負責推拿師: '李永吉', 部位與症狀: '長期久坐肩頸痠痛', 處置與備註: '偏好深層指壓與肩頸鬆筋', 更新時間: nowStr },
       ];
     case 'TCM_T':
       return [
-        { ID: 'TCT-001', 狀態: '預約中', 姓名: '吳明宏', 預約日期: today, 預約時段: '15:00', 負責推拿師: '李永吉', 施作項目: '全身推拿', 服務節數: '2.0', 開始時間: '', 結束時間: '', 消費金額: '1600', 處置與備註: '肩頸加強鬆筋', 更新時間: today },
-        { ID: 'TCT-002', 狀態: '執行中', 姓名: '周美玲', 預約日期: today, 預約時段: '13:30', 負責推拿師: '李佳馨', 施作項目: '腳底', 服務節數: '1.0', 開始時間: `${today}T13:32`, 結束時間: '', 消費金額: '900', 處置與備註: '足底反射區調理中', 更新時間: today },
+        { ID: 'TCT-001', 狀態: '預約中', 客戶姓名: '吳明宏', 預約日期: today, 預約時段: '15:00', 負責推拿師: '李永吉', 施作項目: '全身推拿', 服務節數: '2.0', 開始時間: '', 結束時間: '', 消費金額: '1600', 處置與備註: '肩頸加強鬆筋', 更新時間: today },
+        { ID: 'TCT-002', 狀態: '執行中', 客戶姓名: '周美玲', 預約日期: today, 預約時段: '13:30', 負責推拿師: '李佳馨', 施作項目: '腳底', 服務節數: '1.0', 開始時間: `${today}T13:32`, 結束時間: '', 消費金額: '900', 處置與備註: '足底反射區調理中', 更新時間: today },
       ];
     case 'NAIL_M':
       return [
-        { ID: 'NLM-001', 狀態: '活躍會員', 姓名: '劉欣怡', 手機: '0988-331-209', 性別: '女', 生日: '1994-09-22', 偏好款式: '極簡法式貓眼', 備註: '甲面較薄需做建構加厚', 更新時間: nowStr },
+        { ID: 'NLM-001', 狀態: '預約中', 客戶姓名: '劉欣怡', 手機: '0988-331-209', 指定美甲師: 'Mia', 預約日期: tomorrow, 預約時段: '14:30', 施作項目: '造型設計', 預估金額: '1580', 備註與需求: '極簡法式貓眼，甲面較薄需做建構加厚', 更新時間: nowStr },
       ];
     case 'NAIL_T':
       return [
-        { ID: 'NLT-001', 狀態: '預約中', 姓名: '劉欣怡', 預約日期: tomorrow, 預約時段: '14:30', 指定美甲師: 'Mia', 施作項目: '造型設計', 開始時間: '', 結束時間: '', 消費金額: '1580', 更新時間: today },
+        { ID: 'NLT-001', 狀態: '預約中', 客戶姓名: '劉欣怡', 預約日期: tomorrow, 預約時段: '14:30', 指定美甲師: 'Mia', 施作項目: '造型設計', 開始時間: '', 結束時間: '', 消費金額: '1580', 更新時間: today },
       ];
     case 'ELDER_M':
       return [
-        { ID: 'ELM-001', 狀態: '關懷中', 姓名: '林福氣伯伯', 編號: 'ELD-101', 手機: '0910-554-321', 班別: '大安健康活力班', 緊急電話: '02-2700-1122', 家屬: '林先生 (長子)', 地址: '台北市大安區和平東路二段', 健康備註: '血壓穩定，每週參與體適能課', 更新時間: nowStr },
+        { ID: 'ELM-001', 所屬班別: '一班', 姓名: '林福氣伯伯', 長者編號: 'ELD-101', 長者手機: '0910-554-321', 班長: '陳班長', 緊急電話: '02-2700-1122', 家屬聯絡人: '林先生 (長子)', 關懷進度: '每週定期電訪關懷', 健康與備註: '血壓穩定，每週參與體適能課', 更新時間: nowStr },
       ];
     case 'ELDER_T':
       return [
@@ -686,7 +692,7 @@ function createDefaultSeedForModule(sysType: string, memberMid: string): Dynamic
       ];
     case 'FRUIT_M':
       return [
-        { ID: 'FRM-001', 狀態: '販售中', 品名: '玉井頂級愛文芒果禮盒', 類別: '當季鮮果', 單價: '880', 單位: '5斤箱', 庫存量: '60', 產地: '台南玉井', 供應商: '玉井果農產銷班', 備註: '在欉紅自然熟成', 更新時間: nowStr },
+        { ID: 'FRM-001', 類別: '當季水果', 品名: '玉井頂級愛文芒果禮盒', 單價: '880', 單位: '5斤箱', 庫存量: '60', 產地: '台南玉井', 供應商: '玉井果農產銷班', 備註: '在欉紅自然熟成', 更新時間: nowStr },
       ];
     case 'FRUIT_T':
       return [
@@ -694,7 +700,7 @@ function createDefaultSeedForModule(sysType: string, memberMid: string): Dynamic
       ];
     case 'GROCERY_M':
       return [
-        { ID: 'GRM-001', 狀態: '常備品', 品名: '有機履歷舒康雞胸肉', 類別: '生鮮肉品', 預設位置: '冷藏', 單位: '包', 備註: '每日高蛋白補貨基準 5 包', 更新時間: nowStr },
+        { ID: 'GRM-001', 狀態: '庫存中', 品名: '有機履歷舒康雞胸肉', 物品類別: '生鮮肉品', 存放位置: '冷藏', 數量: '6', 單位: '包', 購買日期: today, 有效期限: getOffsetDateStr(5), 備註: '每日高蛋白補貨基準 5 包', 更新時間: nowStr },
       ];
     case 'GROCERY_T':
       return [
@@ -702,11 +708,11 @@ function createDefaultSeedForModule(sysType: string, memberMid: string): Dynamic
       ];
     case 'ASSOC_M':
       return [
-        { ID: 'ASM-001', 狀態: '理監事', 單位名稱: '仁愛康健整合診所', 負責人: '陳建國院長', 手機: '0933-888-100', 職務: '常務理事', 入會年: '2023', 地址: '台北市仁愛路四段', 更新時間: nowStr },
+        { ID: 'ASM-001', 會籍狀態: '理監事', 診所與單位: '仁愛康健整合診所', 負責人姓名: '陳建國院長', 手機: '0933-888-100', 擔任職務: '常務理事', 繳費狀態: '本年度已繳', 入會年份: '2023', 單位地址: '台中市大甲區仁愛路四段', 備註: '中醫藥整合照護專長', 更新時間: nowStr },
       ];
     case 'ASSOC_T':
       return [
-        { ID: 'AST-001', 狀態: '未繳', 單位名稱: '仁愛康健整合診所', 年度: '2026', 繳費項目: '2026 年度常年會費暨聯誼晚宴', 金額: '3600', 備註: '待財務確認入帳核銷', 更新時間: today },
+        { ID: 'AST-001', 狀態: '未繳', 診所與單位: '仁愛康健整合診所', 年度: '2026', 繳費項目: '2026 年度常年會費暨聯誼晚宴', 金額: '3600', 備註: '待財務確認入帳核銷', 更新時間: today },
       ];
     case 'BOOKING_M':
       return [
@@ -863,81 +869,81 @@ export const ORDERABLE_SOFTWARE_CATALOG: OrderableModuleCatalogItem[] = [
   },
   {
     key: 'ATOMY',
-    title: '經銷組織會員',
+    title: '艾多美會員',
     codeLabel: 'ATOMY_M/T',
-    masterDesc: '會員主檔 (推薦人/左右線別/會員編號)',
+    masterDesc: '艾多美會員 (經營狀態/會員編號/推薦人/安置人/線別)',
     transDesc: '銷售與跟進流水 (業績累計與成交金額)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'ELDER',
-    title: '銀髮關懷照護',
+    title: '長者關懷紀錄',
     codeLabel: 'ELDER_M/T',
-    masterDesc: '長者主檔 (班別/家屬/緊急電話/健康備註)',
+    masterDesc: '長者關懷紀錄 (所屬班別/長者編號/班長/緊急電話/家屬)',
     transDesc: '訪視紀錄 (血壓數據/關懷內容/異常追蹤)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'PRODUCT',
-    title: '產銷商品訂單',
+    title: '購物車產品',
     codeLabel: 'PRODUCT_M/T',
-    masterDesc: '產品主檔 (品名/價格/單位/即時庫存)',
+    masterDesc: '購物車產品 (類別/品名/價格/單位/產品備註)',
     transDesc: '訂單紀錄 (下單數量/總金額/出貨結案營利)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'FRUIT',
-    title: '生鮮蔬果產銷',
+    title: '水果店管理',
     codeLabel: 'FRUIT_M/T',
-    masterDesc: '水果品項檔 (產地/供應商/單價/熟成度)',
+    masterDesc: '水果店管理 (分類/單價/單位/庫存量/產地/供應商)',
     transDesc: '進銷存流水 (進貨/賣出/報廢損益結算)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'GROCERY',
-    title: '居家生鮮庫存',
+    title: '家庭食材庫存 (FIFO)',
     codeLabel: 'GROCERY_M/T',
-    masterDesc: '食材主檔 (冷藏/冷凍/常溫預設儲存位置)',
+    masterDesc: '家庭食材庫存 FIFO (物品類別/存放位置/數量/有效期限)',
     transDesc: '進出庫紀錄 (購買日期/有效期限預警追蹤)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'NAIL',
-    title: '美甲沙龍預約',
+    title: '美甲醫美預約',
     codeLabel: 'NAIL_M/T',
-    masterDesc: '美甲會員檔 (偏好款式/生日/過敏備註)',
+    masterDesc: '美甲醫美預約 (美甲師/預約時段/施作項目/預估金額)',
     transDesc: '預約流水線 (美甲師打卡開始與結帳營利)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'ASSOC',
-    title: '公會聯誼管理',
+    title: '大甲區中醫藥聯誼會',
     codeLabel: 'ASSOC_M/T',
-    masterDesc: '聯誼會員檔 (診所單位/負責人/理監事職務)',
+    masterDesc: '大甲區中醫藥聯誼會 (會籍/診所單位/負責人/職務/會費)',
     transDesc: '繳費與活動 (常年會費催繳與活動核銷金額)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'TCM',
-    title: '推拿養生調理',
+    title: '推拿預約管理',
     codeLabel: 'TCM_M/T',
-    masterDesc: '推拿會員總表 (性別/生日/病史與身體狀況)',
+    masterDesc: '推拿預約管理 (預約時段/推拿師/部位與症狀/處置備註)',
     transDesc: '推拿流水線 (動態表單/師傅節數打卡結帳)',
     monthlyRentNtd: 100,
     trialDays: 30,
   },
   {
     key: 'CONTACT',
-    title: '通訊錄 CRM',
+    title: '通訊錄系統',
     codeLabel: 'CONTACT_M/T',
-    masterDesc: '通訊主檔 (開發名單/Line/地址/會員綁定)',
+    masterDesc: '通訊錄系統 (關係分類/姓名/手機/電話/Line/Email/地址)',
     transDesc: '聯繫追蹤紀錄 (洽談內容/下一步推進日誌)',
     monthlyRentNtd: 100,
     trialDays: 30,
@@ -945,10 +951,10 @@ export const ORDERABLE_SOFTWARE_CATALOG: OrderableModuleCatalogItem[] = [
   },
   {
     key: 'EVENT',
-    title: '活動行銷',
+    title: '活動花絮系統',
     codeLabel: 'EVENT_M/T',
-    masterDesc: '活動企劃主檔 (日期/地點/預算/負責人)',
-    transDesc: '活動花絮圖庫 (現場照片標題與實況發布)',
+    masterDesc: '活動花絮系統 (活動分類/活動主題/照片標題/拍攝地點/備註)',
+    transDesc: '活動花絮明細 (現場照片標題與實況發布)',
     monthlyRentNtd: 100,
     trialDays: 30,
     isCore1Plus1: true,
@@ -1053,4 +1059,249 @@ export function appendMemberOrderReceipt(memberMid: string, receipt: SoftwareOrd
     // ignore
   }
 }
+
+// ============================================================
+// 會員個人化擴充：下拉選單自訂手寫選項 / 自訂左側選單項目 / 拖移排序持久化
+// ============================================================
+
+const CUSTOM_SELECT_OPTS_PREFIX = 'AIS_CUSTOM_SELECT_OPTS_V1_';
+const CUSTOM_MODULES_PREFIX = 'AIS_CUSTOM_MODULES_V1_';
+const SIDEBAR_PACK_ORDER_PREFIX = 'AIS_SIDEBAR_PACK_ORDER_V1_';
+const SIDEBAR_TOP_ORDER_PREFIX = 'AIS_SIDEBAR_TOP_ORDER_V1_';
+
+export type SidebarTopNavId = 'ALL' | 'ORG_TREE' | 'BOOKING' | 'TODO_BOARD' | 'ORDER_STORE';
+
+export const DEFAULT_SIDEBAR_TOP_ORDER: SidebarTopNavId[] = [
+  'ALL',
+  'ORG_TREE',
+  'BOOKING',
+  'TODO_BOARD',
+  'ORDER_STORE',
+];
+
+export interface CustomMemberModuleDef {
+  baseKey: string;
+  title: string;
+  cats: string[];
+  nameFieldLabel?: string;
+  iconColor: string;
+  createdAt: string;
+}
+
+function loadCustomSelectOptionsMap(memberMid: string): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(`${CUSTOM_SELECT_OPTS_PREFIX}${memberMid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed as Record<string, string[]>;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function saveCustomSelectOptionsMap(memberMid: string, map: Record<string, string[]>) {
+  try {
+    localStorage.setItem(`${CUSTOM_SELECT_OPTS_PREFIX}${memberMid}`, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+export function getMemberCustomSelectOptions(
+  memberMid: string,
+  sysKey: string,
+  fieldId: string
+): string[] {
+  const map = loadCustomSelectOptionsMap(memberMid);
+  const list = map[`${sysKey}::${fieldId}`];
+  return Array.isArray(list) ? list : [];
+}
+
+export function addMemberCustomSelectOption(
+  memberMid: string,
+  sysKey: string,
+  fieldId: string,
+  rawValue: string
+): string[] {
+  const val = rawValue.trim();
+  if (!val) return getMemberCustomSelectOptions(memberMid, sysKey, fieldId);
+  const map = loadCustomSelectOptionsMap(memberMid);
+  const compositeKey = `${sysKey}::${fieldId}`;
+  const current = Array.isArray(map[compositeKey]) ? map[compositeKey] : [];
+  if (!current.includes(val)) {
+    map[compositeKey] = [...current, val];
+    saveCustomSelectOptionsMap(memberMid, map);
+  }
+  return map[compositeKey];
+}
+
+export function getMergedSelectOptions(
+  memberMid: string,
+  sysKey: string,
+  fieldId: string,
+  baseOptions: string[] = [],
+  extraValues: string[] = []
+): string[] {
+  const custom = getMemberCustomSelectOptions(memberMid, sysKey, fieldId);
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  [...baseOptions, ...custom, ...extraValues].forEach((opt) => {
+    const clean = String(opt || '').trim();
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      merged.push(clean);
+    }
+  });
+  return merged;
+}
+
+export function getMemberCustomModules(memberMid: string): CustomMemberModuleDef[] {
+  try {
+    const raw = localStorage.getItem(`${CUSTOM_MODULES_PREFIX}${memberMid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed as CustomMemberModuleDef[];
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function saveMemberCustomModules(memberMid: string, modules: CustomMemberModuleDef[]) {
+  try {
+    localStorage.setItem(`${CUSTOM_MODULES_PREFIX}${memberMid}`, JSON.stringify(modules));
+  } catch {
+    // ignore
+  }
+}
+
+export function addMemberCustomModule(
+  memberMid: string,
+  input: {
+    title: string;
+    cats?: string[];
+    nameFieldLabel?: string;
+    iconColor?: string;
+  }
+): CustomMemberModuleDef {
+  const existing = getMemberCustomModules(memberMid);
+  const baseKey = `CUSTOM_${Date.now().toString(36).toUpperCase()}`;
+  const cleanCats = (input.cats || [])
+    .map((c) => c.trim())
+    .filter(Boolean);
+  const cats = cleanCats.length > 0 ? Array.from(new Set(cleanCats)) : ['進行中', '待追蹤', '已完成'];
+  const created: CustomMemberModuleDef = {
+    baseKey,
+    title: input.title.trim(),
+    cats,
+    nameFieldLabel: (input.nameFieldLabel || '項目名稱').trim() || '項目名稱',
+    iconColor: input.iconColor || 'text-indigo-600',
+    createdAt: new Date().toISOString(),
+  };
+  saveMemberCustomModules(memberMid, [...existing, created]);
+  return created;
+}
+
+export function removeMemberCustomModule(memberMid: string, baseKey: string): CustomMemberModuleDef[] {
+  const next = getMemberCustomModules(memberMid).filter((m) => m.baseKey !== baseKey);
+  saveMemberCustomModules(memberMid, next);
+  return next;
+}
+
+export function buildCustomSysConfig(def: CustomMemberModuleDef): SysModuleConfig {
+  const cats = def.cats.length > 0 ? def.cats : ['進行中', '待追蹤', '已完成'];
+  const nameLabel = def.nameFieldLabel || '項目名稱';
+  return {
+    key: `${def.baseKey}_M`,
+    baseKey: def.baseKey,
+    name: def.title,
+    iconColor: def.iconColor || 'text-indigo-600',
+    searchMsg: `🔍 搜尋${nameLabel}、分類、手機、備註...`,
+    catField: '分類',
+    defaultCat: cats[0],
+    nameField: '名稱',
+    cats,
+    cardLine1: { label: '手機/聯絡', key: '手機' },
+    cardLine2: { label: '日期', key: '日期' },
+    fields: [
+      { id: '分類', label: '分類標籤 👈*', type: 'select', options: cats, required: true },
+      { id: '名稱', label: `👤 ${nameLabel} 👈*`, type: 'text', required: true },
+      { id: '手機', label: '📱 手機/聯絡', type: 'tel', half: true },
+      { id: '日期', label: '📅 日期', type: 'date', half: true },
+      { id: '金額', label: '💲 金額/數量', type: 'number', half: true },
+      { id: '對象', label: '🏷️ 負責人/對象', type: 'text', half: true },
+      { id: '備註', label: '📝 詳細備註', type: 'textarea' },
+    ],
+  };
+}
+
+export function getResolvedSysConfig(
+  memberMid: string,
+  sysKey: string
+): SysModuleConfig | undefined {
+  if (SYS_CONFIG[sysKey]) return SYS_CONFIG[sysKey];
+  const customs = getMemberCustomModules(memberMid);
+  for (const def of customs) {
+    if (`${def.baseKey}_M` === sysKey) {
+      return buildCustomSysConfig(def);
+    }
+  }
+  return undefined;
+}
+
+export function getMemberSidebarPackOrder(memberMid: string): string[] {
+  try {
+    const raw = localStorage.getItem(`${SIDEBAR_PACK_ORDER_PREFIX}${memberMid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function saveMemberSidebarPackOrder(memberMid: string, order: string[]) {
+  try {
+    localStorage.setItem(`${SIDEBAR_PACK_ORDER_PREFIX}${memberMid}`, JSON.stringify(order));
+  } catch {
+    // ignore
+  }
+}
+
+export function getMemberSidebarTopOrder(memberMid: string): SidebarTopNavId[] {
+  try {
+    const raw = localStorage.getItem(`${SIDEBAR_TOP_ORDER_PREFIX}${memberMid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((id): id is SidebarTopNavId =>
+          DEFAULT_SIDEBAR_TOP_ORDER.includes(id as SidebarTopNavId)
+        );
+        const missing = DEFAULT_SIDEBAR_TOP_ORDER.filter((id) => !valid.includes(id));
+        return [...valid, ...missing];
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [...DEFAULT_SIDEBAR_TOP_ORDER];
+}
+
+export function saveMemberSidebarTopOrder(memberMid: string, order: SidebarTopNavId[]) {
+  try {
+    localStorage.setItem(`${SIDEBAR_TOP_ORDER_PREFIX}${memberMid}`, JSON.stringify(order));
+  } catch {
+    // ignore
+  }
+}
+
 

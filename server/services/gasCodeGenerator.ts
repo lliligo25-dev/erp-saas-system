@@ -10,9 +10,10 @@ export const GOOGLE_APPS_SCRIPT_CODE = `/**
  * ============================================================================
  * 
  * 核心規範依據：
- * 1. 會員 MID (A-碼)：新會員入會統一從 A-00001 起始建檔 (單軌 A-00001 ~ A-25000000；雙軌從 A-25000001 起算)。
- * 2. 節點 Node ID (C-碼)：單軌 C-00001 ~ C-25000000；雙軌定海神針為 C-25000001。
- * 3. 雙軌開局池：C-25000002 ~ C-25000514 (共 513 席，直推人 100% 綁定 A-00001113)。
+ * 1. 單軌編號：A-00001 ~ A-25000000 (單軌節點 C-00001 ~ C-25000000)。
+ * 2. 雙軌編號：會員 A-25000001 起；雙軌節點 C-25000001 起 (定海神針為 C-25000001)。
+ * 3. 公司自營系統不得轉讓 (63 席永久鎖定)：A-00001 ~ A-00063 (單軌 C-00001 ~ C-00063、雙軌 C-25000001 ~ C-25000063)。
+ *    直推鏈：A-00001→A-00002→A-00003→A-00004→A-00005→A-00006→A-00007→直推 A-00008~A-00063；A-00064 起對外開放。
  * 4. 新會員「1+1 自動雙發」：同筆事務發放 2 組 30 天體驗 AI 軟體 (第一組進單軌公排，第二組 BFS 滑落雙軌)。
  * 5. 100 元月租 100% 閉環清算 (15+15+6+6+30+28 = 100 點，零資金沉澱)。
  */
@@ -20,8 +21,12 @@ export const GOOGLE_APPS_SCRIPT_CODE = `/**
 // 全局邊界設定
 var GLOBAL_CONFIG = {
   SYSTEM_NAME: "產銷合一物流直銷單軌轉雙軌 SaaS ERP 系統",
+  MONOLINE_MAX_SEQ: 25000000,
+  BINARY_START_SEQ: 25000001,
   BINARY_ROOT_NODE_ID: "C-25000001",
-  FLAGSHIP_SPONSOR_MID: "A-00001113",
+  HQ_LOCKED_MAX_SEQ: 63,
+  PUBLIC_OPEN_START_SEQ: 64,
+  FLAGSHIP_SPONSOR_MID: "A-00008",
   TRIAL_DAYS: 30,
   RENTAL_FEE: 100,
   SHEET_MEMBERS: "會員主檔",
@@ -41,17 +46,18 @@ var GLOBAL_CONFIG = {
   BACKUP_RETENTION_DAYS: 30,
   TIMEZONE: "Asia/Taipei",
   DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
-  FRONTEND_APP_URL: "https://erp-saas-system.onrender.com"
+  FRONTEND_APP_URL: "https://erp-saas-system.onrender.com",
+  DEFAULT_PHOTO_URL: "https://drive.google.com/thumbnail?sz=w800&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ"
 };
 
 // ================= Google Sheets 模組配置 (通訊錄與活動) =================
 var SHEET_CONFIG = {
   // 1. 通訊錄
-  'CONTACT_M': { sheet: "通訊主檔", prefix: "CM-", imgIdx: 8, headers: ["ID", "狀態", "姓名", "手機", "電話", "Line", "Email", "地址", "照片連結", "更新時間"] },
+  'CONTACT_M': { sheet: "通訊主檔", prefix: "CM-", imgIdx: 8, headers: ["ID", "類別", "姓名", "手機", "電話", "Line", "Email", "地址", "照片連結", "更新時間"] },
   'CONTACT_T': { sheet: "聯繫紀錄", prefix: "CT-", imgIdx: 7, headers: ["ID", "狀態", "姓名", "聯繫日期", "聯繫方式", "洽談內容", "下一步計畫", "照片連結", "更新時間"] },
   // 2. 活動
-  'EVENT_M': { sheet: "活動主檔", prefix: "EM-", imgIdx: 8, headers: ["ID", "狀態", "活動主題", "日期", "地點", "預算", "負責人", "備註", "照片連結", "更新時間"] },
-  'EVENT_T': { sheet: "活動花絮", prefix: "ET-", imgIdx: 6, headers: ["ID", "狀態", "活動主題", "照片標題", "拍攝地點", "內容備註", "照片連結", "更新時間"] },
+  'EVENT_M': { sheet: "活動主檔", prefix: "EM-", imgIdx: 8, headers: ["ID", "活動分類", "活動主題", "日期", "拍攝地點", "預算", "照片標題", "備註", "照片連結", "更新時間"] },
+  'EVENT_T': { sheet: "活動花絮", prefix: "ET-", imgIdx: 6, headers: ["ID", "活動分類", "活動主題", "照片標題", "拍攝地點", "備註", "照片連結", "更新時間"] },
   // 3. 代辦事項系統 (TODO_M/T)
   'TODO_M': { sheet: "代辦專案主檔", prefix: "TDM-", imgIdx: -1, headers: ["ID", "狀態", "專案名稱", "類別", "優先級", "負責人", "目標日期", "說明與備註", "會員MID", "更新時間"] },
   'TODO_T': { sheet: "代辦事項明細", prefix: "TDT-", imgIdx: -1, headers: ["ID", "狀態", "事項標題", "專案名稱", "優先級", "截止日期", "提醒時間", "承辦人", "結束時間", "詳細說明", "會員MID", "更新時間"] }
@@ -269,7 +275,40 @@ function doGet(e) {
 }
 
 /**
+ * 判斷是否為公司自營系統不得轉讓席位 (A-00001 ~ A-00063)
+ */
+function isHqNonTransferableMid_(mid) {
+  var m = String(mid || "").trim().toUpperCase().match(/^A-(\\d+)$/);
+  if (!m) return false;
+  var n = parseInt(m[1], 10);
+  return !isNaN(n) && n >= 1 && n <= GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ;
+}
+
+/**
+ * 判斷是否為公司自營不得轉讓節點 (單軌 C-00001~C-00063 或 雙軌 C-25000001~C-25000063)
+ */
+function isHqNonTransferableNodeId_(nodeId) {
+  var m = String(nodeId || "").trim().toUpperCase().match(/^C-(\\d+)$/);
+  if (!m) return false;
+  var n = parseInt(m[1], 10);
+  if (isNaN(n)) return false;
+  if (n >= 1 && n <= GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ) return true;
+  if (n >= GLOBAL_CONFIG.BINARY_START_SEQ && n <= (GLOBAL_CONFIG.BINARY_START_SEQ + GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ - 1)) return true;
+  return false;
+}
+
+/**
+ * 取得公司自營 63 席直推鏈推薦人：1→2→3→4→5→6→7→(8~63)
+ */
+function getHqDirectSponsorMid_(seq) {
+  if (seq <= 1) return "SYSTEM_ROOT";
+  if (seq <= 7) return "A-" + padZero(seq - 1, 5);
+  return "A-00007";
+}
+
+/**
  * 一鍵初始化 Google Sheets 資料庫表結構 (Database Schema Initializer)
+ * 內建：公司自營不得轉讓 63 席 (A-00001 ~ A-00063) + 對外首波永吉家族 (A-00064 ~ A-00068，皆由 A-00008 直推)
  */
 function setupDatabaseSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -278,24 +317,97 @@ function setupDatabaseSheets() {
   } catch (e) {
     Logger.log("setSpreadsheetTimeZone Warning: " + e.toString());
   }
-  var nowTw = formatTaiwanDateTime_(new Date());
+  var now = new Date();
+  var nowTw = formatTaiwanDateTime_(now);
+  var todayStr = Utilities.formatDate(now, GLOBAL_CONFIG.TIMEZONE, "yyyy-MM-dd");
+  var trialExpireTw = formatTaiwanDateTime_(new Date(now.getTime() + (GLOBAL_CONFIG.TRIAL_DAYS * 24 * 60 * 60 * 1000)));
   var permanentExpireTw = "2099-12-31 23:59:59";
-  
+
+  var yongjiFamily = [
+    { seq: 64, name: "李永吉", cm: "CM-00001", ct: "CT-00001", note: "永吉家族主帳號（A-00008 直推，對外開放第 1 席 A-00064）" },
+    { seq: 65, name: "李佳馨", cm: "CM-00002", ct: "CT-00002", note: "永吉家族成員（A-00008 直推，A-00065）" },
+    { seq: 66, name: "林美珍", cm: "CM-00003", ct: "CT-00003", note: "永吉家族成員（A-00008 直推，A-00066）" },
+    { seq: 67, name: "李皇穎", cm: "CM-00004", ct: "CT-00004", note: "永吉家族成員（A-00008 直推，A-00067）" },
+    { seq: 68, name: "李孟馨", cm: "CM-00005", ct: "CT-00005", note: "永吉家族成員（A-00008 直推，A-00068）" }
+  ];
+  var totalSeedCount = GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ + yongjiFamily.length; // 68
+
+  var memberRows = [];
+  var monoRows = [];
+  var biRows = [];
+  var contactMRows = [];
+  var contactTRows = [];
+
+  for (var i = 1; i <= totalSeedCount; i++) {
+    var isHq = i <= GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ;
+    var yj = isHq ? null : yongjiFamily[i - GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ - 1];
+    var mid = "A-" + padZero(i, 5);
+    var monoId = "C-" + padZero(i, 5);
+    var biSeq = GLOBAL_CONFIG.BINARY_START_SEQ + (i - 1);
+    var biId = "C-" + padZero(biSeq, 8);
+    var sponsorMid = isHq ? getHqDirectSponsorMid_(i) : "A-00008";
+    var memberName = isHq
+      ? (i === 1
+        ? "總公司自營 001 號 (系統頂點 · 不得轉讓)"
+        : (i <= 7
+          ? ("總公司自營 " + padZero(i, 3) + " 號 (核心直推鏈 · 不得轉讓)")
+          : (i === 8
+            ? "總公司自營 008 號 (對外直推首席 · 不得轉讓)"
+            : ("總公司自營 " + padZero(i, 3) + " 號 (開局自營 · 不得轉讓)"))))
+      : yj.name;
+
+    var phoneVal = isHq ? ("0900-000-" + padZero(i, 3)) : ("0910-000-" + padZero(i, 3));
+    var idMaskVal = isHq ? ("HQ00***" + padZero(i, 3)) : ("YJ64***" + padZero(i, 3));
+    var expVal = isHq ? permanentExpireTw : trialExpireTw;
+    var statusVal = isHq ? "HQ_LOCKED" : "TRIAL_ACTIVE";
+
+    memberRows.push([
+      mid, memberName, phoneVal, idMaskVal,
+      sponsorMid, "S-HQ-01", "EDU-HQ-01", nowTw, expVal, 0, monoId, biId
+    ]);
+
+    var prevMono = (i === 1) ? "HQ_ROOT" : ("C-" + padZero(i - 1, 5));
+    monoRows.push([
+      monoId, mid,
+      isHq ? (memberName + " [單軌]") : (memberName + " (第1組AI-單軌體驗)"),
+      prevMono, i, sponsorMid, statusVal, isHq, expVal, 0
+    ]);
+
+    var parentBiId = (i === 1) ? "SYSTEM_ROOT" : ("C-" + padZero(GLOBAL_CONFIG.BINARY_START_SEQ + Math.floor(i / 2) - 1, 8));
+    var pos = (i === 1) ? "ROOT" : ((i % 2 === 0) ? "L" : "R");
+    var depth = Math.floor(Math.log(i) / Math.LN2);
+    var leftChild = (2 * i <= totalSeedCount) ? ("C-" + padZero(GLOBAL_CONFIG.BINARY_START_SEQ + (2 * i) - 1, 8)) : "";
+    var rightChild = (2 * i + 1 <= totalSeedCount) ? ("C-" + padZero(GLOBAL_CONFIG.BINARY_START_SEQ + (2 * i + 1) - 1, 8)) : "";
+    biRows.push([
+      biId, mid,
+      isHq ? (i === 1 ? "雙軌定海神針 (總公司自營 001 號 · 不得轉讓)" : (memberName + " [雙軌]")) : (memberName + " (第2組AI-雙軌分身)"),
+      parentBiId, pos, depth, leftChild, rightChild, sponsorMid, statusVal, isHq, expVal, 0
+    ]);
+
+    if (!isHq && yj) {
+      contactMRows.push([
+        yj.cm, "永吉家族已建檔", yj.name, phoneVal, "02-8888-00" + padZero(i, 2),
+        "yongji_" + i, "a" + padZero(i, 5) + "@yongji-family.tw", "台灣永吉家族營運據點", GLOBAL_CONFIG.DEFAULT_PHOTO_URL, nowTw
+      ]);
+      contactTRows.push([
+        yj.ct, "開通體驗", yj.name, todayStr, "總部首批建檔",
+        yj.note, "啟用單軌 " + monoId + " 與雙軌 " + biId + " 體驗服務", GLOBAL_CONFIG.DEFAULT_PHOTO_URL, nowTw
+      ]);
+    }
+  }
+
   // 1. 會員主檔
   var sMembers = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_MEMBERS);
   if (sMembers.getLastRow() === 0) {
     sMembers.appendRow([
-      "會員編號(MID)", "會員姓名", "手機號碼", "身分證號(去識別)", 
-      "推薦人MID", "所屬經營店", "所屬教育中心", "註冊時間", 
+      "會員編號(MID)", "會員姓名", "手機號碼", "身分證號(去識別)",
+      "推薦人MID", "所屬經營店", "所屬教育中心", "註冊時間",
       "30天體驗到期日", "累積未滿100零錢池", "第1組單軌節點ID", "第2組雙軌節點ID"
     ]);
     sMembers.getRange(1, 1, 1, 12).setBackground("#1E293B").setFontColor("#FFFFFF").setFontWeight("bold");
-    
-    // 初始化旗艦領袖
-    appendRowWithPlainTextCols_(sMembers, [
-      GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "第6代旗艦領袖 (總直推錨點)", "0988-001-113", "A123***113",
-      "A-00000001", "S-HQ-01", "EDU-HQ-01", nowTw, permanentExpireTw, 0, "C-00001113", "C-25000001"
-    ], [3, 4, 8, 9]);
+    sMembers.getRange(2, 3, memberRows.length, 2).setNumberFormat("@");
+    sMembers.getRange(2, 8, memberRows.length, 2).setNumberFormat("@");
+    sMembers.getRange(2, 1, memberRows.length, 12).setValues(memberRows);
   }
   sMembers.getRange("C:C").setNumberFormat("@");
 
@@ -303,36 +415,33 @@ function setupDatabaseSheets() {
   var sMono = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_MONOLINE);
   if (sMono.getLastRow() === 0) {
     sMono.appendRow([
-      "單軌節點ID(C-碼)", "會員MID(A-碼)", "節點名稱", "父節點ID(前一席)", 
+      "單軌節點ID(C-碼)", "會員MID(A-碼)", "節點名稱", "父節點ID(前一席)",
       "公排序號(Depth)", "直推推薦人MID", "節點狀態", "自營永久鎖定", "體驗到期日", "累積收益點數"
     ]);
     sMono.getRange(1, 1, 1, 10).setBackground("#0F766E").setFontColor("#FFFFFF").setFontWeight("bold");
+    sMono.getRange(2, 9, monoRows.length, 1).setNumberFormat("@");
+    sMono.getRange(2, 1, monoRows.length, 10).setValues(monoRows);
   }
 
   // 3. 雙軌二元樹安置表
   var sBi = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_BINARY);
   if (sBi.getLastRow() === 0) {
     sBi.appendRow([
-      "雙軌節點ID(C-碼)", "會員MID(A-碼)", "節點名稱", "父節點ID", 
-      "安置位置(L/R)", "樹深(Depth)", "左子節點ID", "右子節點ID", 
+      "雙軌節點ID(C-碼)", "會員MID(A-碼)", "節點名稱", "父節點ID",
+      "安置位置(L/R)", "樹深(Depth)", "左子節點ID", "右子節點ID",
       "直推推薦人MID", "節點狀態", "自營永久鎖定", "體驗到期日", "累積收益點數"
     ]);
     sBi.getRange(1, 1, 1, 13).setBackground("#1D4ED8").setFontColor("#FFFFFF").setFontWeight("bold");
-    
-    // 建立雙軌定海神針 Root (Depth = 0)
-    sBi.appendRow([
-      GLOBAL_CONFIG.BINARY_ROOT_NODE_ID, GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "雙軌定海神針 (Binary Root)",
-      "SYSTEM_ROOT", "ROOT", 0, "C-25000002", "C-25000003",
-      GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID, "HQ_LOCKED", true, permanentExpireTw, 0
-    ]);
+    sBi.getRange(2, 12, biRows.length, 1).setNumberFormat("@");
+    sBi.getRange(2, 1, biRows.length, 13).setValues(biRows);
   }
 
   // 4. 月租清算流水帳 (100% 閉環平帳表)
   var sSet = getOrCreateSheet(ss, GLOBAL_CONFIG.SHEET_SETTLEMENTS);
   if (sSet.getLastRow() === 0) {
     sSet.appendRow([
-      "交易流水號", "繳費節點ID", "會員MID", "繳費金額(NTD)", 
-      "15代直推分紅合計", "15代雙軌排線分紅合計", "6代經營店補貼", "6代教育中心補貼", 
+      "交易流水號", "繳費節點ID", "會員MID", "繳費金額(NTD)",
+      "15代直推分紅合計", "15代雙軌排線分紅合計", "6代經營店補貼", "6代教育中心補貼",
       "艾邦妮科技系統池(30%)", "總公司營運管理池(28%)", "公共安全池(熔斷)", "平帳總驗證(點)", "清算時間"
     ]);
     sSet.getRange(1, 1, 1, 13).setBackground("#7E22CE").setFontColor("#FFFFFF").setFontWeight("bold");
@@ -353,6 +462,11 @@ function setupDatabaseSheets() {
   if (sContactM.getLastRow() === 0) {
     sContactM.appendRow(cfgContactM.headers);
     sContactM.getRange(1, 1, 1, cfgContactM.headers.length).setBackground("#0284C7").setFontColor("#FFFFFF").setFontWeight("bold");
+    if (contactMRows.length > 0) {
+      sContactM.getRange(2, 4, contactMRows.length, 2).setNumberFormat("@");
+      sContactM.getRange(2, 10, contactMRows.length, 1).setNumberFormat("@");
+      sContactM.getRange(2, 1, contactMRows.length, cfgContactM.headers.length).setValues(contactMRows);
+    }
   }
   sContactM.getRange("D:E").setNumberFormat("@");
 
@@ -362,6 +476,11 @@ function setupDatabaseSheets() {
   if (sContactT.getLastRow() === 0) {
     sContactT.appendRow(cfgContactT.headers);
     sContactT.getRange(1, 1, 1, cfgContactT.headers.length).setBackground("#0369A1").setFontColor("#FFFFFF").setFontWeight("bold");
+    if (contactTRows.length > 0) {
+      sContactT.getRange(2, 4, contactTRows.length, 1).setNumberFormat("@");
+      sContactT.getRange(2, 9, contactTRows.length, 1).setNumberFormat("@");
+      sContactT.getRange(2, 1, contactTRows.length, cfgContactT.headers.length).setValues(contactTRows);
+    }
   }
 
   // 8. 活動主檔 (EVENT_M / EM-)
@@ -396,7 +515,7 @@ function setupDatabaseSheets() {
     sTodoT.getRange(1, 1, 1, cfgTodoT.headers.length).setBackground("#059669").setFontColor("#FFFFFF").setFontWeight("bold");
   }
 
-  return { success: true, message: "資料庫十一大工作表 (含通訊錄 CM/CT、活動 EM/ET 與代辦事項 TDM/TDT) 建立完成！" };
+  return { success: true, message: "資料庫十一大工作表建立完成！已預載公司自營 63 席 (A-00001~A-00063) 與永吉家族 (A-00064~A-00068)。" };
 }
 
 /**
@@ -411,9 +530,21 @@ function processNewMemberRegistration(memberData) {
   var sheetContactM = ss.getSheetByName(SHEET_CONFIG['CONTACT_M'].sheet);
   var sheetContactT = ss.getSheetByName(SHEET_CONFIG['CONTACT_T'].sheet);
 
-  // 1. 優先採用網頁伺服器核發的權威 MID / 單軌節點 ID（確保兩邊編號 100% 一致），若單獨在 GAS 呼叫則自動起編
-  var lastRowMembers = sheetMembers ? sheetMembers.getLastRow() : 1;
-  var sequenceNumber = (lastRowMembers <= 1) ? 1 : lastRowMembers;
+  // 1. 優先採用網頁伺服器核發的權威 MID / 單軌節點 ID（確保兩邊編號 100% 一致），若單獨在 GAS 呼叫則從 A-00064 起自動遞增
+  var maxMemberSeq = GLOBAL_CONFIG.PUBLIC_OPEN_START_SEQ - 1; // 63
+  if (sheetMembers && sheetMembers.getLastRow() >= 2) {
+    var existingMids = sheetMembers.getRange(2, 1, sheetMembers.getLastRow() - 1, 1).getValues();
+    for (var mi = 0; mi < existingMids.length; mi++) {
+      var mMatch = String(existingMids[mi][0] || "").trim().toUpperCase().match(/^A-(\\d+)$/);
+      if (mMatch) {
+        var mNum = parseInt(mMatch[1], 10);
+        if (!isNaN(mNum) && mNum <= GLOBAL_CONFIG.MONOLINE_MAX_SEQ && mNum > maxMemberSeq) {
+          maxMemberSeq = mNum;
+        }
+      }
+    }
+  }
+  var sequenceNumber = maxMemberSeq + 1;
   var monolineMid = memberData.mid ? String(memberData.mid).trim().toUpperCase() : ("A-" + padZero(sequenceNumber, 5));
   var monolineNodeId = memberData.monolineNodeId ? String(memberData.monolineNodeId).trim().toUpperCase() : ("C-" + padZero(sequenceNumber, 5));
   var prevMonolineNodeId = memberData.monolineParentId
@@ -474,7 +605,10 @@ function processNewMemberRegistration(memberData) {
   } else {
     placement = findNextAvailableBinaryPlacement(GLOBAL_CONFIG.BINARY_ROOT_NODE_ID);
   }
-  var binarySeqNumber = 25000514 + Math.max(0, lastRowMembers - 1);
+  var binarySeqNumber = Math.max(
+    GLOBAL_CONFIG.BINARY_START_SEQ + GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ,
+    (placement && placement.maxCounter ? placement.maxCounter + 1 : GLOBAL_CONFIG.BINARY_START_SEQ + GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ)
+  );
   var binaryNodeId = memberData.binaryNodeId
     ? String(memberData.binaryNodeId).trim().toUpperCase()
     : ("C-" + padZero(binarySeqNumber, 8));
@@ -520,7 +654,7 @@ function processNewMemberRegistration(memberData) {
 
   // 5. 自動寫入通訊主檔 (CONTACT_M / CM-) - 全欄位落盤且手機/市話強制純文字
   var contactId = memberData.contactId ? String(memberData.contactId).trim().toUpperCase() : ("CM-" + padZero(sequenceNumber, 5));
-  var userPhoto = memberData.photoUrl || "https://images.unsplash.com/photo-1534528741775?w=200&auto=format&fit=crop&q=80";
+  var userPhoto = memberData.photoUrl || GLOBAL_CONFIG.DEFAULT_PHOTO_URL;
   if (sheetContactM) {
     appendRowWithPlainTextCols_(sheetContactM, [
       contactId,
@@ -616,14 +750,15 @@ function findNextAvailableBinaryPlacement(rootId) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(GLOBAL_CONFIG.SHEET_BINARY);
   var lastRow = sheet ? sheet.getLastRow() : 0;
+  var hqBiMax = GLOBAL_CONFIG.BINARY_START_SEQ + GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ - 1; // 25000063
   if (lastRow < 2) {
-    return { parentId: rootId, position: "L", depth: 1, parentRowIndex: 2, maxCounter: 25000514 };
+    return { parentId: rootId, position: "L", depth: 1, parentRowIndex: 2, maxCounter: hqBiMax };
   }
 
   // 只讀取 A:H (0:nodeId, 5:depth, 6:leftChildId, 7:rightChildId)
   var data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
   var nodeMap = {};
-  var maxCounter = 25000514;
+  var maxCounter = hqBiMax;
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
     var nid = String(row[0] || "");
@@ -726,18 +861,19 @@ function allocateSoftwareBinaryNode(data) {
     }
   }
 
+  var hqBiMaxDefault = GLOBAL_CONFIG.BINARY_START_SEQ + GLOBAL_CONFIG.HQ_LOCKED_MAX_SEQ - 1;
   var placement = (data && data.parentId)
     ? {
         parentId: String(data.parentId).trim().toUpperCase(),
         position: String(data.position || "L").trim().toUpperCase(),
         depth: (typeof data.depth === "number" && !isNaN(data.depth)) ? data.depth : 1,
         parentRowIndex: null,
-        maxCounter: 25000514
+        maxCounter: hqBiMaxDefault
       }
     : findNextAvailableBinaryPlacement(GLOBAL_CONFIG.BINARY_ROOT_NODE_ID);
   var binaryNodeId = (data && data.binaryNodeId)
     ? String(data.binaryNodeId).trim().toUpperCase()
-    : ("C-" + padZero((placement.maxCounter || 25000514) + 1, 8));
+    : ("C-" + padZero((placement.maxCounter || hqBiMaxDefault) + 1, 8));
   var now = new Date();
   var expireDate = (data && data.expiresAt)
     ? parseTaiwanDate_(data.expiresAt)
@@ -3009,8 +3145,8 @@ function hqUpdateMemberInSheet(data) {
 function hqDeleteMemberInSheet(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var targetMid = String((data && data.mid) || "").trim().toUpperCase();
-  if (!targetMid || targetMid === GLOBAL_CONFIG.FLAGSHIP_SPONSOR_MID) {
-    return { success: false, error: "禁止刪除系統核心錨點或無效編號" };
+  if (!targetMid || isHqNonTransferableMid_(targetMid)) {
+    return { success: false, error: "公司自營系統席位 (A-00001 ~ A-00063) 永久鎖定不得刪除或轉讓" };
   }
 
   var sheetMembers = ss.getSheetByName(GLOBAL_CONFIG.SHEET_MEMBERS);
@@ -3130,8 +3266,8 @@ function hqDeleteNodeInSheet(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var track = String((data && data.track) || "").trim().toUpperCase();
   var nodeId = String((data && data.nodeId) || "").trim().toUpperCase();
-  if (!nodeId || nodeId === GLOBAL_CONFIG.BINARY_ROOT_NODE_ID) {
-    return { success: false, error: "禁止刪除系統根節點或無效編號" };
+  if (!nodeId || nodeId === GLOBAL_CONFIG.BINARY_ROOT_NODE_ID || isHqNonTransferableNodeId_(nodeId)) {
+    return { success: false, error: "公司自營系統節點 (C-00001~C-00063 / C-25000001~C-25000063) 永久鎖定不得刪除或轉讓" };
   }
 
   var sheetName = track === "MONOLINE" ? GLOBAL_CONFIG.SHEET_MONOLINE : GLOBAL_CONFIG.SHEET_BINARY;
@@ -3308,7 +3444,7 @@ function upsertCrmRecordInSheet(data) {
   if (sysType === "CONTACT_M") {
     rowValues = [
       id,
-      String(rec.status || "開通AI軟體1+1"),
+      String(rec.status || "親朋好友"),
       String(rec.name || ""),
       normalizePhoneText_(rec.phone || ""),
       String(rec.tel || ""),
@@ -3339,7 +3475,7 @@ function upsertCrmRecordInSheet(data) {
   } else if (sysType === "EVENT_M") {
     rowValues = [
       id,
-      String(rec.status || "報名中"),
+      String(rec.status || "會議"),
       String(rec.eventTheme || ""),
       String(rec.date || ""),
       String(rec.location || ""),
@@ -3353,7 +3489,7 @@ function upsertCrmRecordInSheet(data) {
   } else if (sysType === "EVENT_T") {
     rowValues = [
       id,
-      String(rec.status || "公開發布"),
+      String(rec.status || "會議"),
       String(rec.eventTheme || ""),
       String(rec.photoTitle || ""),
       String(rec.shootLocation || ""),
@@ -3435,17 +3571,17 @@ export const GOOGLE_SHEETS_SCHEMA_DOCS = [
     color: '#1D4ED8',
     description: '以 C-25000001 為定海神針頂點，依滿二元樹與 BFS 廣度搜尋自動滑落安置 (L/R)。',
     columns: [
-      { name: '雙軌節點ID(C-碼)', type: 'String (C-25000001 ~ C-25000514 HQ / C-25000515+)', key: true },
-      { name: '會員MID(A-碼)', type: 'String', key: false },
+      { name: '雙軌節點ID(C-碼)', type: 'String (C-25000001 ~ C-25000063 公司自營 / C-25000064+ 對外開放)', key: true },
+      { name: '會員MID(A-碼)', type: 'String (單軌 A-00001~A-25000000 / 雙軌 A-25000001 起)', key: false },
       { name: '節點名稱', type: 'String', key: false },
       { name: '父節點ID', type: 'String (安置上層節點)', key: false },
       { name: '安置位置(L/R)', type: 'Enum (L / R / ROOT)', key: false },
       { name: '樹深(Depth)', type: 'Integer (0 為根節點)', key: false },
       { name: '左子節點ID', type: 'String (leftChildId)', key: false },
       { name: '右子節點ID', type: 'String (rightChildId)', key: false },
-      { name: '直推推薦人MID', type: 'String (開局池為 A-00001113)', key: false },
+      { name: '直推推薦人MID', type: 'String (公司鏈 1→2→3→4→5→6→7→8~63；對外由 A-00008 起推)', key: false },
       { name: '節點狀態', type: 'Enum (HQ_LOCKED / TRIAL_ACTIVE / ACTIVE_RENEWED)', key: false },
-      { name: '自營永久鎖定', type: 'Boolean (開局 513 席為 TRUE)', key: false },
+      { name: '自營永久鎖定', type: 'Boolean (公司自營 63 席為 TRUE，不得轉讓)', key: false },
       { name: '體驗到期日', type: 'DateTime', key: false },
       { name: '累積收益點數', type: 'Number', key: false },
     ],

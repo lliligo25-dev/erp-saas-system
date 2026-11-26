@@ -8,8 +8,10 @@ import {
   ORDERABLE_SOFTWARE_CATALOG,
   SYS_CONFIG,
   appendMemberOrderReceipt,
+  getMemberCustomModules,
   getMemberModuleSubscriptions,
   getMemberUnlockedPacks,
+  getResolvedSysConfig,
   loadMemberDynamicRecords,
   saveMemberModuleSubscriptions,
   saveMemberUnlockedPacks,
@@ -19,6 +21,8 @@ import { apiProvisionMemberCloudWorkspace } from './confidentialApiClient';
 import { Member } from '../types/erp';
 
 export const CLOUD_VAULT_UPDATED_EVENT = 'ais-cloud-vault-updated';
+export const DEFAULT_SHEET_PHOTO_URL =
+  'https://drive.google.com/thumbnail?sz=w800&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ';
 
 const VAULT_STORAGE_KEY = 'AIS_MEMBER_CLOUD_VAULTS_V1';
 
@@ -154,6 +158,19 @@ export function getModuleWritePermission(
   moduleOrSysKey: string
 ): ModuleWritePermission {
   const baseKey = normalizeBaseKey(moduleOrSysKey);
+  if (baseKey.startsWith('CUSTOM_')) {
+    const customDef = getMemberCustomModules(memberMid).find((m) => m.baseKey === baseKey);
+    return {
+      baseKey,
+      softwareTitle: customDef?.title || baseKey,
+      status: 'PAID_ACTIVE',
+      daysRemaining: 365,
+      canView: true,
+      canCreate: true,
+      isExpired: false,
+      isNotOrdered: false,
+    };
+  }
   const member = erpEngine.getMemberById(memberMid);
   const cat = ORDERABLE_SOFTWARE_CATALOG.find((c) => c.key === baseKey);
   const softwareTitle = cat?.title || baseKey;
@@ -317,30 +334,39 @@ function formatDateTimeCell(raw?: string): string {
 export function getMemberCloudSheetTabData(memberMid: string, sysType: string): MemberSheetTabData {
   const normalizedMid = memberMid.trim().toUpperCase();
   const normalizedSys = sysType.trim().toUpperCase();
-  const conf = SYS_CONFIG[normalizedSys];
+  const conf = getResolvedSysConfig(normalizedMid, normalizedSys);
   const baseKey = normalizeBaseKey(normalizedSys);
+  const customDef = baseKey.startsWith('CUSTOM_')
+    ? getMemberCustomModules(normalizedMid).find((m) => m.baseKey === baseKey)
+    : undefined;
   const cat = ORDERABLE_SOFTWARE_CATALOG.find((c) => c.key === baseKey);
-  const baseTitle = cat?.title || baseKey;
+  const baseTitle = customDef?.title || cat?.title || baseKey;
   const tabLabel = conf ? conf.name : normalizedSys === 'BOOKING_T' ? '2. 個人預約明細' : normalizedSys;
   const cleanLabel = tabLabel.replace(/^\d+\.\s*/, '');
   const tabName = `${normalizedSys}_${cleanLabel}`;
-  const title = `${baseTitle} · ${cleanLabel}`;
+  const title = customDef ? `${baseTitle}（自訂模組）` : `${baseTitle} · ${cleanLabel}`;
+
+  const resolveSheetPhoto = (raw?: string): string => {
+    const val = (raw || '').trim();
+    if (!val || val.includes('images.unsplash.com')) return DEFAULT_SHEET_PHOTO_URL;
+    return val;
+  };
 
   if (normalizedSys === 'CONTACT_M') {
-    const columns = ['ID', '狀態', '姓名', '手機', '電話', 'LINE', 'Email', '住址', '照片連結', '最後更新'];
+    const columns = ['ID', '類別', '姓名', '手機', '電話', 'Line', 'Email', '地址', '照片連結', '最後更新'];
     const rows = erpEngine
       .getAllContacts()
       .filter((c) => c.ownerMid === normalizedMid || c.memberMid === normalizedMid)
       .map((c) => ({
         ID: c.id || '',
-        狀態: c.status || '',
+        類別: c.status || '親朋好友',
         姓名: c.name || '',
         手機: c.phone || '',
         電話: c.tel || '',
-        LINE: c.line || '',
+        Line: c.line || '',
         Email: c.email || '',
-        住址: c.address || '',
-        照片連結: c.photoUrl || '',
+        地址: c.address || '',
+        照片連結: resolveSheetPhoto(c.photoUrl),
         最後更新: formatDateTimeCell(c.updatedAt),
       }));
     return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
@@ -359,39 +385,37 @@ export function getMemberCloudSheetTabData(memberMid: string, sysType: string): 
         方式: t.contactMethod || '',
         內容摘要: t.discussionContent || '',
         下一步計畫: t.nextStepPlan || '',
-        照片連結: t.photoUrl || '',
+        照片連結: resolveSheetPhoto(t.photoUrl),
         紀錄時間: formatDateTimeCell(t.updatedAt),
       }));
     return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
   }
 
   if (normalizedSys === 'EVENT_M') {
-    const columns = ['ID', '狀態', '活動主題', '日期', '地點', '預算', '負責人', '備註', '照片連結', '最後更新'];
+    const columns = ['ID', '活動分類', '活動主題', '照片標題', '拍攝地點', '備註', '照片連結', '最後更新'];
     const rows = erpEngine.getAllEvents().map((e) => ({
       ID: e.id || '',
-      狀態: e.status || '',
+      活動分類: e.status || '會議',
       活動主題: e.eventTheme || '',
-      日期: e.date || '',
-      地點: e.location || '',
-      預算: e.budget !== undefined ? String(e.budget) : '',
-      負責人: e.leader || '',
+      照片標題: e.leader || e.eventTheme || '',
+      拍攝地點: e.location || '',
       備註: e.notes || '',
-      照片連結: e.photoUrl || '',
+      照片連結: resolveSheetPhoto(e.photoUrl),
       最後更新: formatDateTimeCell(e.updatedAt),
     }));
     return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
   }
 
   if (normalizedSys === 'EVENT_T') {
-    const columns = ['ID', '狀態', '活動主題', '照片標題', '拍攝地點', '內容說明', '照片連結', '紀錄時間'];
+    const columns = ['ID', '活動分類', '活動主題', '照片標題', '拍攝地點', '備註', '照片連結', '紀錄時間'];
     const rows = erpEngine.getAllEventTrackings().map((t) => ({
       ID: t.id || '',
-      狀態: t.status || '',
+      活動分類: t.status || '會議',
       活動主題: t.eventTheme || '',
       照片標題: t.photoTitle || '',
       拍攝地點: t.shootLocation || '',
-      內容說明: t.contentNotes || '',
-      照片連結: t.photoUrl || '',
+      備註: t.contentNotes || '',
+      照片連結: resolveSheetPhoto(t.photoUrl),
       紀錄時間: formatDateTimeCell(t.updatedAt),
     }));
     return { sysType: normalizedSys, tabName, title, columns, rows, recordCount: rows.length };
@@ -415,7 +439,7 @@ export function getMemberCloudSheetTabData(memberMid: string, sysType: string): 
 
   const dynRecords = loadMemberDynamicRecords(normalizedMid, normalizedSys);
   const baseCols = conf
-    ? ['ID', '狀態', ...conf.fields.map((f) => f.id), '照片連結', '最後更新']
+    ? ['ID', ...conf.fields.map((f) => f.id), '照片連結', '最後更新']
     : ['ID', '狀態', '名稱', '備註', '照片連結', '最後更新'];
   const colSet = new Set<string>(baseCols);
   dynRecords.forEach((rec) => {
@@ -428,7 +452,11 @@ export function getMemberCloudSheetTabData(memberMid: string, sysType: string): 
     const row: Record<string, string> = {};
     columns.forEach((col) => {
       const val = rec[col];
-      row[col] = val === undefined || val === null ? '' : String(val);
+      if (col === '照片連結' || col.toLowerCase().includes('photo')) {
+        row[col] = resolveSheetPhoto(val === undefined || val === null ? '' : String(val));
+      } else {
+        row[col] = val === undefined || val === null ? '' : String(val);
+      }
     });
     return row;
   });
@@ -519,8 +547,14 @@ export function ensureMemberCloudWorkspace(memberMid: string): MemberCloudWorksp
   const unlocked = getMemberUnlockedPacks(normalizedMid);
   const subs = getMemberModuleSubscriptions(normalizedMid, member?.trialExpiresAt);
 
-  // 收集會員名下所有應納入專屬試算表的工作表分頁 (核心 1+1 + 預約 + 待辦 + 已開通/已訂購模組)
-  const moduleKeys = new Set<string>(['CONTACT', 'EVENT', ...unlocked]);
+  // 收集會員名下所有應納入專屬試算表的工作表分頁 (核心 1+1 + 預約 + 待辦 + 已開通/已訂購模組 + 自訂模組)
+  const customModules = getMemberCustomModules(normalizedMid);
+  const moduleKeys = new Set<string>([
+    'CONTACT',
+    'EVENT',
+    ...unlocked,
+    ...customModules.map((m) => m.baseKey),
+  ]);
   Object.values(subs).forEach((s) => {
     if (s.status !== 'NOT_ORDERED') {
       moduleKeys.add(s.moduleKey);
@@ -533,18 +567,19 @@ export function ensureMemberCloudWorkspace(memberMid: string): MemberCloudWorksp
   const sheetTabs: MemberCloudSheetTab[] = [];
   moduleKeys.forEach((baseKey) => {
     const perm = getModuleWritePermission(normalizedMid, baseKey);
+    const customDef = customModules.find((m) => m.baseKey === baseKey);
     const cat = ORDERABLE_SOFTWARE_CATALOG.find((c) => c.key === baseKey);
-    const baseTitle = cat?.title || baseKey;
+    const baseTitle = customDef?.title || cat?.title || baseKey;
 
     [`${baseKey}_M`, `${baseKey}_T`].forEach((sysType) => {
-      const conf = SYS_CONFIG[sysType];
+      const conf = getResolvedSysConfig(normalizedMid, sysType);
       if (!conf && sysType !== 'BOOKING_T') return;
       const tabLabel = conf ? conf.name : '2. 個人預約明細';
       sheetTabs.push({
         moduleKey: baseKey,
         sysType,
         tabName: `${sysType}_${tabLabel.replace(/^\d+\.\s*/, '')}`,
-        title: `${baseTitle} · ${tabLabel.replace(/^\d+\.\s*/, '')}`,
+        title: customDef ? `${baseTitle}（自訂模組）` : `${baseTitle} · ${tabLabel.replace(/^\d+\.\s*/, '')}`,
         recordCount: countModuleRecords(member, sysType),
         canView: true,
         canCreate: perm.canCreate,

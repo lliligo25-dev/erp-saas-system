@@ -16,6 +16,9 @@ import {
   INDUSTRY_PACKS,
   DynamicRecord,
   SysModuleConfig,
+  CustomMemberModuleDef,
+  SidebarTopNavId,
+  DEFAULT_SIDEBAR_TOP_ORDER,
   getOffsetDateStr,
   getCurrentDateTimeStr,
   getMemberUnlockedPacks,
@@ -25,6 +28,16 @@ import {
   loadMemberDynamicRecords,
   saveMemberDynamicRecords,
   ORDERABLE_SOFTWARE_CATALOG,
+  addMemberCustomSelectOption,
+  getMergedSelectOptions,
+  getMemberCustomModules,
+  addMemberCustomModule,
+  removeMemberCustomModule,
+  buildCustomSysConfig,
+  getMemberSidebarPackOrder,
+  saveMemberSidebarPackOrder,
+  getMemberSidebarTopOrder,
+  saveMemberSidebarTopOrder,
 } from '../services/memberFiveStarConfig';
 import {
   syncMemberPurchasedProductsToNodes,
@@ -112,6 +125,13 @@ import {
   Copy,
   ExternalLink,
   Eye,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  FolderPlus,
+  Pencil,
+  RotateCcw,
 } from 'lucide-react';
 import { SoftwareOrderSystemView } from './SoftwareOrderSystemView';
 import { PersonalTodoBoard } from './PersonalTodoBoard';
@@ -122,7 +142,14 @@ import {
   notifyTodosUpdated,
 } from '../services/gasTodoSyncService';
 
-type ActiveSysKey = 'ALL' | 'ORG_TREE' | 'BOOKING' | 'ORDER_STORE' | 'TODO_BOARD' | keyof typeof SYS_CONFIG;
+type ActiveSysKey =
+  | 'ALL'
+  | 'ORG_TREE'
+  | 'BOOKING'
+  | 'ORDER_STORE'
+  | 'TODO_BOARD'
+  | keyof typeof SYS_CONFIG
+  | (string & {});
 type AspectMode = '16/9' | '3/4' | '4/3' | '1/1' | 'detail';
 type DateFilterMode = 'ALL' | 'TODAY' | 'TOMORROW' | 'DAY_AFTER' | 'WEEK';
 
@@ -214,7 +241,7 @@ function getPackIcon(baseKey: string) {
 function findAmountFieldId(conf?: SysModuleConfig): string | null {
   if (!conf) return null;
   const f = conf.fields.find((fld) =>
-    ['消費金額', '總金額', '金額'].includes(fld.id)
+    ['消費金額', '總金額', '金額', '預估金額'].includes(fld.id)
   );
   return f ? f.id : null;
 }
@@ -291,12 +318,140 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   const [workspaceCloudSyncing, setWorkspaceCloudSyncing] = useState(false);
   const lastCloudPullAtRef = useRef<number>(0);
 
-  // Unlocked Industry Packs per member
+  // Unlocked Industry Packs + Custom User Sidebar Modules + Drag-and-Drop Order per member
   const [unlockedPacks, setUnlockedPacks] = useState<string[]>(() =>
     getMemberUnlockedPacks(memberMid)
   );
+  const [customModules, setCustomModules] = useState<CustomMemberModuleDef[]>(() =>
+    getMemberCustomModules(memberMid)
+  );
+  const [sidebarPackOrder, setSidebarPackOrder] = useState<string[]>(() =>
+    getMemberSidebarPackOrder(memberMid)
+  );
+  const [sidebarTopOrder, setSidebarTopOrder] = useState<SidebarTopNavId[]>(() =>
+    getMemberSidebarTopOrder(memberMid)
+  );
+  const [sidebarReorderMode, setSidebarReorderMode] = useState(false);
+  const [draggedPackKey, setDraggedPackKey] = useState<string | null>(null);
+  const [dragOverPackKey, setDragOverPackKey] = useState<string | null>(null);
+  const [draggedTopId, setDraggedTopId] = useState<SidebarTopNavId | null>(null);
+  const [dragOverTopId, setDragOverTopId] = useState<SidebarTopNavId | null>(null);
+  const [addSidebarModalOpen, setAddSidebarModalOpen] = useState(false);
+  const [newItemTitle, setNewItemTitle] = useState('');
+  const [newItemCatsText, setNewItemCatsText] = useState('進行中, 待追蹤, 已完成');
+  const [newItemNameLabel, setNewItemNameLabel] = useState('名稱 / 標題');
+  const [newItemColor, setNewItemColor] = useState('text-indigo-600');
+  const [customSelectWriteMode, setCustomSelectWriteMode] = useState<Record<string, boolean>>({});
   const [packModalOpen, setPackModalOpen] = useState(false);
   const [cloudSheetPreviewTab, setCloudSheetPreviewTab] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUnlockedPacks(getMemberUnlockedPacks(memberMid));
+    setCustomModules(getMemberCustomModules(memberMid));
+    setSidebarPackOrder(getMemberSidebarPackOrder(memberMid));
+    setSidebarTopOrder(getMemberSidebarTopOrder(memberMid));
+  }, [memberMid]);
+
+  const customModuleConfigMap = useMemo(() => {
+    const map: Record<string, SysModuleConfig> = {};
+    customModules.forEach((def) => {
+      map[`${def.baseKey}_M`] = buildCustomSysConfig(def);
+    });
+    return map;
+  }, [customModules]);
+
+  const resolveSysConf = useCallback(
+    (sysKey: string): SysModuleConfig | undefined => {
+      return SYS_CONFIG[sysKey] || customModuleConfigMap[sysKey];
+    },
+    [customModuleConfigMap]
+  );
+
+  // Ordered visible sidebar packs (unlocked built-in packs + user-created custom modules)
+  const orderedSidebarPacks = useMemo(() => {
+    const builtIn = INDUSTRY_PACKS.filter((p) => unlockedPacks.includes(p.baseKey)).map((p) => ({
+      baseKey: p.baseKey,
+      title: p.title,
+      desc: p.desc,
+      isCustom: false as const,
+      iconColor: '',
+    }));
+    const custom = customModules.map((m) => ({
+      baseKey: m.baseKey,
+      title: m.title,
+      desc: `自訂選單項目（分類：${m.cats.join(' / ')}）`,
+      isCustom: true as const,
+      iconColor: m.iconColor,
+    }));
+    const all = [...builtIn, ...custom];
+    const orderIdx = new Map<string, number>();
+    sidebarPackOrder.forEach((key, idx) => orderIdx.set(key, idx));
+    return [...all].sort((a, b) => {
+      const ia = orderIdx.has(a.baseKey) ? orderIdx.get(a.baseKey)! : 9999;
+      const ib = orderIdx.has(b.baseKey) ? orderIdx.get(b.baseKey)! : 9999;
+      return ia - ib;
+    });
+  }, [unlockedPacks, customModules, sidebarPackOrder]);
+
+  const reorderPackKeys = useCallback(
+    (sourceKey: string, targetKey: string) => {
+      if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+      const currentKeys = orderedSidebarPacks.map((p) => p.baseKey);
+      const fromIdx = currentKeys.indexOf(sourceKey);
+      const toIdx = currentKeys.indexOf(targetKey);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const next = [...currentKeys];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      setSidebarPackOrder(next);
+      saveMemberSidebarPackOrder(memberMid, next);
+    },
+    [orderedSidebarPacks, memberMid]
+  );
+
+  const movePackByOffset = useCallback(
+    (baseKey: string, delta: -1 | 1) => {
+      const currentKeys = orderedSidebarPacks.map((p) => p.baseKey);
+      const idx = currentKeys.indexOf(baseKey);
+      const targetIdx = idx + delta;
+      if (idx < 0 || targetIdx < 0 || targetIdx >= currentKeys.length) return;
+      const next = [...currentKeys];
+      const [moved] = next.splice(idx, 1);
+      next.splice(targetIdx, 0, moved);
+      setSidebarPackOrder(next);
+      saveMemberSidebarPackOrder(memberMid, next);
+    },
+    [orderedSidebarPacks, memberMid]
+  );
+
+  const reorderTopNav = useCallback(
+    (sourceId: SidebarTopNavId, targetId: SidebarTopNavId) => {
+      if (!sourceId || !targetId || sourceId === targetId) return;
+      const fromIdx = sidebarTopOrder.indexOf(sourceId);
+      const toIdx = sidebarTopOrder.indexOf(targetId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const next = [...sidebarTopOrder];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      setSidebarTopOrder(next);
+      saveMemberSidebarTopOrder(memberMid, next);
+    },
+    [sidebarTopOrder, memberMid]
+  );
+
+  const moveTopNavByOffset = useCallback(
+    (id: SidebarTopNavId, delta: -1 | 1) => {
+      const idx = sidebarTopOrder.indexOf(id);
+      const targetIdx = idx + delta;
+      if (idx < 0 || targetIdx < 0 || targetIdx >= sidebarTopOrder.length) return;
+      const next = [...sidebarTopOrder];
+      const [moved] = next.splice(idx, 1);
+      next.splice(targetIdx, 0, moved);
+      setSidebarTopOrder(next);
+      saveMemberSidebarTopOrder(memberMid, next);
+    },
+    [sidebarTopOrder, memberMid]
+  );
 
   const persistUnlockedPacks = useCallback(
     (nextPacks: string[]) => {
@@ -384,9 +539,13 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         }
 
         const serverBySys = res.recordsBySys || {};
-        const dynamicSysKeys = Object.keys(SYS_CONFIG).filter(
-          (k) => !['CONTACT_M', 'CONTACT_T', 'EVENT_M', 'EVENT_T', 'BOOKING_T'].includes(k)
-        );
+        const customSysKeys = getMemberCustomModules(memberMid).map((m) => `${m.baseKey}_M`);
+        const dynamicSysKeys = [
+          ...Object.keys(SYS_CONFIG).filter(
+            (k) => !['CONTACT_M', 'CONTACT_T', 'EVENT_M', 'EVENT_T', 'BOOKING_T'].includes(k)
+          ),
+          ...customSysKeys,
+        ];
         const allSysKeys = Array.from(new Set([...dynamicSysKeys, ...Object.keys(serverBySys)]));
         const seedIdPattern = /^[A-Z]{2,3}-00[1-3]$/;
 
@@ -542,11 +701,19 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         contactMaster?: ContactMasterRecord;
       }
     ) => {
-      const conf = SYS_CONFIG[sysType];
+      const conf = resolveSysConf(sysType);
       if (!conf) return;
       const gMeta = BASE_GRADIENTS[conf.baseKey] || BASE_GRADIENTS.CONTACT;
-      const nameVal = rec[conf.nameField] || rec['姓名'] || rec['品名'] || rec['活動主題'] || rec.ID || '未命名';
-      const statusVal = rec[conf.catField] || conf.defaultCat;
+      const nameVal =
+        rec[conf.nameField] ||
+        rec['姓名'] ||
+        rec['客戶姓名'] ||
+        rec['診所與單位'] ||
+        rec['品名'] ||
+        rec['活動主題'] ||
+        rec.ID ||
+        '未命名';
+      const statusVal = rec[conf.catField] || rec['狀態'] || conf.defaultCat;
       const line1Val = rec[conf.cardLine1.key] || '-';
       const line2Val = rec[conf.cardLine2.key] || '-';
 
@@ -555,7 +722,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       ];
       conf.fields.forEach((f) => {
         fieldsDisplay.push({
-          label: f.label.replace(' *', ''),
+          label: f.label.replace(' 👈*', '').replace(' *', ''),
           value: rec[f.id] || '-',
         });
       });
@@ -597,7 +764,8 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           'CONTACT_M',
           {
             ID: c.id,
-            狀態: c.status,
+            類別: c.status || '親朋好友',
+            狀態: c.status || '親朋好友',
             姓名: c.name,
             手機: c.phone,
             電話: c.tel || '',
@@ -608,8 +776,8 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             更新時間: new Date(c.updatedAt).toLocaleString(),
           },
           {
-            channelOverride: `通訊主檔 · ${c.memberMid || '個人開發名單'}`,
-            subtitleOverride: `${c.phone} · Line: ${c.line || '未填'}`,
+            channelOverride: `通訊錄系統 · ${c.memberMid || '個人開發名單'}`,
+            subtitleOverride: `${c.phone || '未填手機'} · ${c.address || '未填地址'}`,
             contactMaster: c,
           }
         );
@@ -648,19 +816,18 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           'EVENT_M',
           {
             ID: ev.id,
-            狀態: ev.status,
+            活動分類: ev.status || '會議',
+            狀態: ev.status || '會議',
             活動主題: ev.eventTheme,
-            日期: ev.date,
-            負責人: ev.leader,
-            預算: String(ev.budget ?? ''),
-            地點: ev.location,
+            照片標題: ev.leader || ev.eventTheme,
+            拍攝地點: ev.location,
             備註: ev.notes || '',
             照片連結: ev.photoUrl || '',
             更新時間: new Date(ev.updatedAt).toLocaleString(),
           },
           {
-            channelOverride: `活動公告 · ${ev.date}`,
-            subtitleOverride: `${ev.location} · 負責人 ${ev.leader}`,
+            channelOverride: `活動花絮系統 · ${ev.status || '會議'}`,
+            subtitleOverride: `${ev.leader || ev.eventTheme} · ${ev.location}`,
           }
         );
       });
@@ -670,17 +837,18 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           'EVENT_T',
           {
             ID: et.id,
-            狀態: et.status,
+            活動分類: et.status || '會議',
+            狀態: et.status || '會議',
             活動主題: et.eventTheme,
             照片標題: et.photoTitle,
             拍攝地點: et.shootLocation,
-            內容備註: et.contentNotes,
+            備註: et.contentNotes || '',
             照片連結: et.photoUrl || '',
             更新時間: new Date(et.updatedAt).toLocaleString(),
           },
           {
             channelOverride: `活動花絮 · ${et.eventTheme}`,
-            subtitleOverride: `${et.shootLocation} · ${et.contentNotes}`,
+            subtitleOverride: `${et.photoTitle} · ${et.shootLocation}`,
           }
         );
       });
@@ -699,6 +867,13 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         const recs = loadMemberDynamicRecords(memberMid, tKey);
         recs.forEach((r) => pushConfigRecord(tKey, r));
       }
+    });
+
+    // 3B. Member-Created Custom Sidebar Modules
+    customModules.forEach((def) => {
+      const mKey = `${def.baseKey}_M`;
+      const recs = loadMemberDynamicRecords(memberMid, mKey);
+      recs.forEach((r) => pushConfigRecord(mKey, r));
     });
 
     // 4. Scoped 個人預約系統 (BOOKING_T) Appointments
@@ -756,16 +931,16 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     });
 
     return list;
-  }, [memberMid, directReferralMids, unlockedPacks, refreshTick]);
+  }, [memberMid, directReferralMids, unlockedPacks, customModules, resolveSysConf, refreshTick]);
 
-  // Active SYS_CONFIG when viewing a specific dual-track module
+  // Active SYS_CONFIG when viewing a specific dual-track or custom module
   const activeConf: SysModuleConfig | undefined =
     activeSys !== 'ALL' &&
     activeSys !== 'ORG_TREE' &&
     activeSys !== 'BOOKING' &&
     activeSys !== 'ORDER_STORE' &&
     activeSys !== 'TODO_BOARD'
-      ? SYS_CONFIG[activeSys]
+      ? resolveSysConf(activeSys)
       : undefined;
 
   const cloudVault = useMemo(
@@ -822,6 +997,19 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     });
     return counts;
   }, [sysScopedItems]);
+
+  // Merge preset categories + member's custom handwritten categories + actual record statuses
+  const activeDisplayCats = useMemo(() => {
+    if (!activeConf) return [];
+    const existingStatuses = sysScopedItems.map((i) => i.status).filter(Boolean);
+    return getMergedSelectOptions(
+      memberMid,
+      activeConf.key,
+      activeConf.catField,
+      activeConf.cats,
+      existingStatuses
+    );
+  }, [memberMid, activeConf, sysScopedItems, refreshTick]);
 
   // Revenue KPI Calculation for _T modules with an amount field
   const revenueKpi = useMemo(() => {
@@ -894,15 +1082,17 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     });
   }, [sysScopedItems, statusFilter, dateFilter, hasDateFieldInActive, searchTerm]);
 
-  // Unlocked module options for "Create" select dropdown
+  // Unlocked module options for "Create" select dropdown (follows custom sidebar order)
   const unlockedModuleKeys = useMemo(() => {
     const keys: string[] = [];
-    unlockedPacks.forEach((base) => {
-      if (SYS_CONFIG[`${base}_M`]) keys.push(`${base}_M`);
-      if (SYS_CONFIG[`${base}_T`]) keys.push(`${base}_T`);
+    orderedSidebarPacks.forEach((pack) => {
+      const mKey = `${pack.baseKey}_M`;
+      const tKey = `${pack.baseKey}_T`;
+      if (resolveSysConf(mKey)) keys.push(mKey);
+      if (resolveSysConf(tKey)) keys.push(tKey);
     });
     return keys;
-  }, [unlockedPacks]);
+  }, [orderedSidebarPacks, resolveSysConf]);
 
   // Scoped ORG_TREE permitted node IDs (strictly rooted at memberMid's own subtree!)
   const scopedOrgData = useMemo(() => {
@@ -1043,16 +1233,16 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     setShareGroupName('');
   };
 
-  // Helper to build default values for a SYS_CONFIG form
+  // Helper to build default values for a SYS_CONFIG / custom module form
   const buildDefaultFormValues = (sysKey: string, overrides?: DynamicRecord): DynamicRecord => {
-    const conf = SYS_CONFIG[sysKey] || SYS_CONFIG.CONTACT_M;
+    const conf = resolveSysConf(sysKey) || SYS_CONFIG.CONTACT_M;
     const vals: DynamicRecord = {};
     const today = getOffsetDateStr(0);
 
     conf.fields.forEach((f) => {
       if (f.id === conf.catField) {
         vals[f.id] =
-          statusFilter !== 'ALL' && conf.cats.includes(statusFilter)
+          statusFilter !== 'ALL'
             ? statusFilter
             : conf.defaultCat;
       } else if (f.type === 'date') {
@@ -1064,9 +1254,6 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       }
     });
 
-    if (sysKey === 'EVENT_M' && !overrides?.['負責人']) {
-      vals['負責人'] = `${member?.name || memberMid} (${memberMid})`;
-    }
     if (sysKey === 'ATOMY_M' && !overrides?.['推薦人']) {
       vals['推薦人'] = memberMid;
     }
@@ -1075,6 +1262,52 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     }
 
     return { ...vals, ...(overrides || {}) };
+  };
+
+  const handleCreateCustomSidebarModule = () => {
+    const title = newItemTitle.trim();
+    if (!title) {
+      showToast('請輸入要新增的左側選單項目名稱');
+      return;
+    }
+    const cats = newItemCatsText
+      .split(/[,，、/\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const created = addMemberCustomModule(memberMid, {
+      title,
+      cats,
+      nameFieldLabel: newItemNameLabel.trim() || '名稱 / 標題',
+      iconColor: newItemColor || 'text-indigo-600',
+    });
+    const nextCustoms = getMemberCustomModules(memberMid);
+    setCustomModules(nextCustoms);
+
+    const currentKeys = orderedSidebarPacks.map((p) => p.baseKey);
+    const nextOrder = [...currentKeys.filter((k) => k !== created.baseKey), created.baseKey];
+    setSidebarPackOrder(nextOrder);
+    saveMemberSidebarPackOrder(memberMid, nextOrder);
+
+    setNewItemTitle('');
+    setNewItemCatsText('進行中, 待追蹤, 已完成');
+    setNewItemNameLabel('名稱 / 標題');
+    setAddSidebarModalOpen(false);
+    handleSwitchSys(`${created.baseKey}_M`);
+    triggerRefresh();
+    showToast(`已新增左側選單項目「${created.title}」，可隨時拖移調整位置與建檔！`);
+  };
+
+  const handleDeleteCustomSidebarModule = (baseKey: string, title: string) => {
+    const nextCustoms = removeMemberCustomModule(memberMid, baseKey);
+    setCustomModules(nextCustoms);
+    const nextOrder = sidebarPackOrder.filter((k) => k !== baseKey);
+    setSidebarPackOrder(nextOrder);
+    saveMemberSidebarPackOrder(memberMid, nextOrder);
+    if (activeSys === `${baseKey}_M`) {
+      setActiveSys('ALL');
+    }
+    triggerRefresh();
+    showToast(`已從左側選單移除自訂項目「${title}」`);
   };
 
   const openDrawerView = (item: UnifiedCardItem) => {
@@ -1110,6 +1343,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     setDrawerItem(null);
     setFormTargetSys(targetSys);
     setFormValues(buildDefaultFormValues(targetSys, prefillValues));
+    setCustomSelectWriteMode({});
     setFormPhotoUrl(inheritedPhoto || '');
     setFormDrawerExpanded(true);
     setDrawerMode('create');
@@ -1125,6 +1359,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     }
     setFormTargetSys(drawerItem.sysType);
     setFormValues({ ...drawerItem.rawFields });
+    setCustomSelectWriteMode({});
     setFormPhotoUrl(drawerItem.photoUrl || '');
     setFormDrawerExpanded(true);
     setDrawerMode('edit');
@@ -1132,7 +1367,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
   // Master -> Transaction Jump ("建立新紀錄 (自動跳轉)")
   const handleJumpMasterToTrack = (masterItem: UnifiedCardItem) => {
-    const conf = SYS_CONFIG[masterItem.sysType];
+    const conf = resolveSysConf(masterItem.sysType);
     if (!conf) return;
     const perm = getModuleWritePermission(memberMid, conf.baseKey);
     if (!perm.canCreate) {
@@ -1143,7 +1378,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       return;
     }
     const tKey = `${conf.baseKey}_T`;
-    const tConf = SYS_CONFIG[tKey];
+    const tConf = resolveSysConf(tKey);
     if (!tConf) return;
 
     const inheritedName =
@@ -1151,8 +1386,9 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     const prefill: DynamicRecord = {
       [tConf.nameField]: inheritedName,
     };
-    if (masterItem.rawFields['手機']) {
-      prefill['手機'] = masterItem.rawFields['手機'];
+    const inheritedPhone = masterItem.rawFields['手機'] || masterItem.rawFields['長者手機'];
+    if (inheritedPhone && tConf.fields.some((f) => f.id === '手機')) {
+      prefill['手機'] = inheritedPhone;
     }
     if (conf.baseKey === 'PRODUCT' && masterItem.rawFields['價格']) {
       prefill['總金額'] = masterItem.rawFields['價格'];
@@ -1180,7 +1416,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     values: DynamicRecord,
     photoUrl: string
   ): DynamicRecord => {
-    const conf = SYS_CONFIG[sysType];
+    const conf = resolveSysConf(sysType) || SYS_CONFIG.CONTACT_M;
     const nowStr = new Date().toLocaleDateString();
 
     if (sysType === 'BOOKING_T' && mode === 'create') {
@@ -1199,9 +1435,10 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     }
 
     if (sysType === 'CONTACT_M') {
+      const catVal = values['類別'] || values['狀態'] || conf.defaultCat;
       if (mode === 'edit' && existingId) {
         erpEngine.updateContact(existingId, {
-          status: values['狀態'],
+          status: catVal,
           name: values['姓名'],
           phone: values['手機'],
           tel: values['電話'],
@@ -1210,10 +1447,10 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           address: values['地址'],
           photoUrl,
         });
-        return { ...values, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
+        return { ...values, 類別: catVal, 狀態: catVal, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
       } else {
         const rec = erpEngine.addContact({
-          status: values['狀態'] || conf.defaultCat,
+          status: catVal,
           name: values['姓名'],
           phone: values['手機'] || '0900-000-000',
           tel: values['電話'],
@@ -1223,7 +1460,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           photoUrl,
           ownerMid: memberMid,
         });
-        return { ...values, ID: rec.id, 照片連結: photoUrl, 更新時間: nowStr };
+        return { ...values, 類別: catVal, 狀態: catVal, ID: rec.id, 照片連結: photoUrl, 更新時間: nowStr };
       }
     }
 
@@ -1256,54 +1493,59 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     }
 
     if (sysType === 'EVENT_M') {
+      const catVal = values['活動分類'] || values['狀態'] || conf.defaultCat;
+      const photoTitle = values['照片標題'] || values['負責人'] || values['活動主題'] || member?.name || memberMid;
+      const shootLoc = values['拍攝地點'] || values['地點'] || '活動會場';
       if (mode === 'edit' && existingId) {
         erpEngine.updateEvent(existingId, {
-          status: values['狀態'],
-          eventTheme: values['活動主題'],
-          date: values['日期'],
-          location: values['地點'],
-          budget: values['預算'],
-          leader: values['負責人'],
-          notes: values['備註'],
-          photoUrl,
-        });
-        return { ...values, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
-      } else {
-        const rec = erpEngine.addEvent({
-          status: values['狀態'] || conf.defaultCat,
+          status: catVal,
           eventTheme: values['活動主題'],
           date: values['日期'] || getOffsetDateStr(0),
-          location: values['地點'] || '地區教育中心',
-          budget: Number(values['預算']) || 10000,
-          leader: values['負責人'] || member?.name || memberMid,
+          location: shootLoc,
+          budget: values['預算'] ?? 0,
+          leader: photoTitle,
           notes: values['備註'],
           photoUrl,
         });
-        return { ...values, ID: rec.id, 照片連結: photoUrl, 更新時間: nowStr };
+        return { ...values, 活動分類: catVal, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
+      } else {
+        const rec = erpEngine.addEvent({
+          status: catVal,
+          eventTheme: values['活動主題'],
+          date: values['日期'] || getOffsetDateStr(0),
+          location: shootLoc,
+          budget: Number(values['預算']) || 0,
+          leader: photoTitle,
+          notes: values['備註'],
+          photoUrl,
+        });
+        return { ...values, 活動分類: catVal, ID: rec.id, 照片連結: photoUrl, 更新時間: nowStr };
       }
     }
 
     if (sysType === 'EVENT_T') {
+      const catVal = values['活動分類'] || values['狀態'] || conf.defaultCat;
+      const noteVal = values['備註'] || values['內容備註'] || '活動花絮紀錄';
       if (mode === 'edit' && existingId) {
         erpEngine.updateEventTracking(existingId, {
-          status: values['狀態'],
+          status: catVal,
           eventTheme: values['活動主題'],
           photoTitle: values['照片標題'],
           shootLocation: values['拍攝地點'],
-          contentNotes: values['內容備註'],
+          contentNotes: noteVal,
           photoUrl,
         });
-        return { ...values, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
+        return { ...values, 活動分類: catVal, ID: existingId, 照片連結: photoUrl, 更新時間: nowStr };
       } else {
         const rec = erpEngine.addEventTracking({
-          status: values['狀態'] || conf.defaultCat,
+          status: catVal,
           eventTheme: values['活動主題'],
           photoTitle: values['照片標題'] || values['活動主題'],
           shootLocation: values['拍攝地點'] || '活動會場',
-          contentNotes: values['內容備註'] || '活動花絮紀錄',
+          contentNotes: noteVal,
           photoUrl,
         });
-        return { ...values, ID: rec.id, 照片連結: photoUrl, 更新時間: nowStr };
+        return { ...values, 活動分類: catVal, ID: rec.id, 照片連結: photoUrl, 更新時間: nowStr };
       }
     }
 
@@ -1352,7 +1594,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   };
 
   const handleSaveDrawer = (continueCreating: boolean) => {
-    const conf = SYS_CONFIG[formTargetSys];
+    const conf = resolveSysConf(formTargetSys);
     if (!conf) return;
 
     if (drawerMode === 'create') {
@@ -1369,10 +1611,20 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     // Required field check
     for (const f of conf.fields) {
       if (f.required && !String(formValues[f.id] || '').trim()) {
-        showToast(`請填寫必填欄位：${f.label.replace(' *', '')}`);
+        showToast(`請填寫必填欄位：${f.label.replace(' 👈*', '').replace(' *', '')}`);
         return;
       }
     }
+
+    // Auto-save any handwritten custom select values so this member can pick them next time
+    conf.fields.forEach((f) => {
+      if (f.type === 'select') {
+        const cleanVal = String(formValues[f.id] || '').trim();
+        if (cleanVal && !(f.options || []).includes(cleanVal)) {
+          addMemberCustomSelectOption(memberMid, formTargetSys, f.id, cleanVal);
+        }
+      }
+    });
 
     const saved = persistModuleRecord(
       formTargetSys,
@@ -1394,6 +1646,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       setDrawerMode('create');
       setDrawerItem(null);
       setFormPhotoUrl('');
+      setCustomSelectWriteMode({});
       setFormValues(
         buildDefaultFormValues(formTargetSys, { [conf.catField]: keepStatus })
       );
@@ -1404,7 +1657,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
   // Workflow Progression Step 1: 開始推進狀態 (自動打卡)
   const handleStartWorkflow = (item: UnifiedCardItem) => {
-    const conf = SYS_CONFIG[item.sysType];
+    const conf = resolveSysConf(item.sysType);
     if (!conf) return;
 
     let nextStatus = '進行中';
@@ -1445,7 +1698,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
   // Workflow Progression Step 2: Open inline React Checkout Modal
   const handleOpenCheckoutModal = (item: UnifiedCardItem) => {
-    const conf = SYS_CONFIG[item.sysType];
+    const conf = resolveSysConf(item.sysType);
     const amtKey = findAmountFieldId(conf);
     const defaultAmt = amtKey ? item.rawFields[amtKey] || '1000' : '0';
     setCheckoutAmountInput(defaultAmt);
@@ -1454,7 +1707,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
   const handleConfirmCheckout = () => {
     if (!checkoutModalItem) return;
-    const conf = SYS_CONFIG[checkoutModalItem.sysType];
+    const conf = resolveSysConf(checkoutModalItem.sysType);
     if (!conf) return;
 
     const amtKey = findAmountFieldId(conf);
@@ -1656,7 +1909,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   };
 
   // Determine whether View Drawer offers _M-> _T or _T workflow actions
-  const drawerConf = drawerItem ? SYS_CONFIG[drawerItem.sysType] : undefined;
+  const drawerConf = drawerItem ? resolveSysConf(drawerItem.sysType) : undefined;
   const drawerAmountKey = findAmountFieldId(drawerConf);
   const canStartWorkflow =
     drawerItem &&
@@ -1854,180 +2107,405 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             </button>
           </div>
 
-          {/* Sidebar Header: Home + Scoped Org Tree */}
+          {/* Sidebar Header: Draggable Core Nav Shortcuts */}
           <div className="pt-2 px-2 shrink-0 space-y-1">
-            <button
-              type="button"
-              onClick={resetAllFilters}
-              className={`w-full flex items-center rounded-xl transition-colors cursor-pointer ${
-                sidebarCollapsed
-                  ? 'flex-col py-2.5 justify-center gap-1'
-                  : 'px-3 h-10 gap-3'
-              } ${
-                activeSys === 'ALL'
-                  ? 'bg-slate-200/80 font-bold text-slate-900 border-l-4 border-[#065fd4]'
-                  : 'hover:bg-slate-100 text-slate-700'
-              }`}
-            >
-              <Home className="w-5 h-5 text-slate-600 shrink-0" />
-              <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm'}>
-                全部模組總覽
-              </span>
-            </button>
+            {sidebarTopOrder.map((navId, navIdx) => {
+              const isDragTarget = dragOverTopId === navId && draggedTopId !== navId;
+              const isBeingDragged = draggedTopId === navId;
 
-            <button
-              type="button"
-              onClick={() => handleSwitchSys('ORG_TREE')}
-              className={`w-full flex items-center rounded-xl transition-colors cursor-pointer ${
-                sidebarCollapsed
-                  ? 'flex-col py-2.5 justify-center gap-1'
-                  : 'px-3 h-10 gap-3'
-              } ${
-                activeSys === 'ORG_TREE'
-                  ? 'bg-slate-200/80 font-bold text-slate-900 border-l-4 border-indigo-600'
-                  : 'hover:bg-slate-100 text-slate-700'
-              }`}
-            >
-              <Network className="w-5 h-5 text-indigo-600 shrink-0" />
-              <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm'}>
-                組織網矩陣 ({memberMid})
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSwitchSys('BOOKING')}
-              className={`w-full flex items-center rounded-xl transition-colors cursor-pointer ${
-                sidebarCollapsed
-                  ? 'flex-col py-2.5 justify-center gap-1'
-                  : 'px-3 h-10 justify-between'
-              } ${
-                activeSys === 'BOOKING'
-                  ? 'bg-slate-200/80 font-bold text-slate-900 border-l-4 border-emerald-600'
-                  : 'hover:bg-slate-100 text-slate-700'
-              }`}
-            >
-              <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-3'}`}>
-                <CalendarClock className="w-5 h-5 text-emerald-600 shrink-0" />
-                <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm'}>
-                  AI 個人預約
-                </span>
-              </div>
-              {!sidebarCollapsed && (
-                <span className="text-[11px] font-mono bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-semibold">
-                  {sysCounts.BOOKING || 0}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (!unlockedPacks.includes('TODO')) {
-                  const next = [...unlockedPacks, 'TODO'];
-                  persistUnlockedPacks(next);
-                  syncMemberPurchasedProductsToNodes(memberMid);
-                  notifyNodesUpdated(memberMid);
-                  onNodesChanged?.();
-                  showToast('已免費開通「代辦事項系統 (TODO_M/T)」30 天體驗並同步加入名下節點清冊！');
+              const renderCoreButton = () => {
+                if (navId === 'ALL') {
+                  return (
+                    <button
+                      type="button"
+                      onClick={resetAllFilters}
+                      className={`flex-1 min-w-0 flex items-center rounded-xl transition-colors cursor-pointer ${
+                        sidebarCollapsed
+                          ? 'flex-col py-2.5 justify-center gap-1'
+                          : 'px-2.5 h-10 gap-2.5'
+                      } ${
+                        activeSys === 'ALL'
+                          ? 'bg-slate-200/80 font-bold text-slate-900'
+                          : 'hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <Home className="w-4 h-4 text-slate-600 shrink-0" />
+                      <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm truncate'}>
+                        全部模組總覽
+                      </span>
+                    </button>
+                  );
                 }
-                handleSwitchSys('TODO_BOARD');
-              }}
-              className={`w-full flex items-center rounded-xl transition-colors cursor-pointer ${
-                sidebarCollapsed
-                  ? 'flex-col py-2.5 justify-center gap-1'
-                  : 'px-3 h-10 justify-between'
-              } ${
-                activeSys === 'TODO_BOARD' || activeSys === 'TODO_M' || activeSys === 'TODO_T'
-                  ? 'bg-slate-200/80 font-bold text-slate-900 border-l-4 border-blue-600'
-                  : 'hover:bg-slate-100 text-slate-700'
-              }`}
-            >
-              <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-3'}`}>
-                <ListTodo className="w-5 h-5 text-blue-600 shrink-0" />
-                <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm'}>
-                  個人待辦任務面板
-                </span>
-              </div>
-              {!sidebarCollapsed && (
-                <div className="flex items-center gap-1 shrink-0">
-                  {overdueTodoCount > 0 && (
-                    <span className="text-[10px] font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded-full">
-                      {overdueTodoCount} 逾期
+                if (navId === 'ORG_TREE') {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchSys('ORG_TREE')}
+                      className={`flex-1 min-w-0 flex items-center rounded-xl transition-colors cursor-pointer ${
+                        sidebarCollapsed
+                          ? 'flex-col py-2.5 justify-center gap-1'
+                          : 'px-2.5 h-10 gap-2.5'
+                      } ${
+                        activeSys === 'ORG_TREE'
+                          ? 'bg-slate-200/80 font-bold text-slate-900'
+                          : 'hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <Network className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm truncate'}>
+                        組織網矩陣 ({memberMid})
+                      </span>
+                    </button>
+                  );
+                }
+                if (navId === 'BOOKING') {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchSys('BOOKING')}
+                      className={`flex-1 min-w-0 flex items-center rounded-xl transition-colors cursor-pointer ${
+                        sidebarCollapsed
+                          ? 'flex-col py-2.5 justify-center gap-1'
+                          : 'px-2.5 h-10 justify-between gap-2'
+                      } ${
+                        activeSys === 'BOOKING'
+                          ? 'bg-slate-200/80 font-bold text-slate-900'
+                          : 'hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className={`flex items-center min-w-0 ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-2.5'}`}>
+                        <CalendarClock className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm truncate'}>
+                          AI 個人預約
+                        </span>
+                      </div>
+                      {!sidebarCollapsed && (
+                        <span className="text-[11px] font-mono tabular-nums text-emerald-700 font-semibold shrink-0">
+                          {sysCounts.BOOKING || 0}
+                        </span>
+                      )}
+                    </button>
+                  );
+                }
+                if (navId === 'TODO_BOARD') {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!unlockedPacks.includes('TODO')) {
+                          const next = [...unlockedPacks, 'TODO'];
+                          persistUnlockedPacks(next);
+                          syncMemberPurchasedProductsToNodes(memberMid);
+                          notifyNodesUpdated(memberMid);
+                          onNodesChanged?.();
+                          showToast('已免費開通「代辦事項系統 (TODO_M/T)」30 天體驗並同步加入名下節點清冊！');
+                        }
+                        handleSwitchSys('TODO_BOARD');
+                      }}
+                      className={`flex-1 min-w-0 flex items-center rounded-xl transition-colors cursor-pointer ${
+                        sidebarCollapsed
+                          ? 'flex-col py-2.5 justify-center gap-1'
+                          : 'px-2.5 h-10 justify-between gap-2'
+                      } ${
+                        activeSys === 'TODO_BOARD' || activeSys === 'TODO_M' || activeSys === 'TODO_T'
+                          ? 'bg-slate-200/80 font-bold text-slate-900'
+                          : 'hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className={`flex items-center min-w-0 ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-2.5'}`}>
+                        <ListTodo className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm truncate'}>
+                          個人待辦任務面板
+                        </span>
+                      </div>
+                      {!sidebarCollapsed && (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {overdueTodoCount > 0 && (
+                            <span className="text-[10px] font-bold text-rose-600 tabular-nums">
+                              {overdueTodoCount}逾期
+                            </span>
+                          )}
+                          <span className="text-[11px] font-mono tabular-nums text-blue-700 font-semibold">
+                            {sysCounts.TODO_T || 0}
+                          </span>
+                        </div>
+                      )}
+                    </button>
+                  );
+                }
+                return (
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchSys('ORDER_STORE')}
+                    className={`flex-1 min-w-0 flex items-center rounded-xl transition-colors cursor-pointer ${
+                      sidebarCollapsed
+                        ? 'flex-col py-2.5 justify-center gap-1'
+                        : 'px-2.5 h-10 justify-between gap-2'
+                    } ${
+                      activeSys === 'ORDER_STORE'
+                        ? 'bg-amber-50 font-bold text-amber-950'
+                        : 'hover:bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    <div className={`flex items-center min-w-0 ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-2.5'}`}>
+                      <ShoppingBag className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm truncate'}>
+                        AI 軟體訂購系統
+                      </span>
+                    </div>
+                    {!sidebarCollapsed && (
+                      <span className="text-[10px] font-bold text-amber-700 shrink-0">
+                        30天免費
+                      </span>
+                    )}
+                  </button>
+                );
+              };
+
+              return (
+                <div
+                  key={navId}
+                  draggable={!sidebarCollapsed}
+                  onDragStart={(e) => {
+                    setDraggedTopId(navId);
+                    setDraggedPackKey(null);
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', `TOP::${navId}`);
+                  }}
+                  onDragOver={(e) => {
+                    if (!draggedTopId) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverTopId !== navId) setDragOverTopId(navId);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverTopId === navId) setDragOverTopId(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggedTopId && draggedTopId !== navId) {
+                      reorderTopNav(draggedTopId, navId);
+                      showToast('已更新左側選單排序！');
+                    }
+                    setDraggedTopId(null);
+                    setDragOverTopId(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedTopId(null);
+                    setDragOverTopId(null);
+                  }}
+                  className={`group flex items-center gap-0.5 rounded-xl transition-all ${
+                    isDragTarget ? 'ring-2 ring-[#065fd4] bg-blue-50/70' : ''
+                  } ${isBeingDragged ? 'opacity-45' : ''}`}
+                >
+                  {!sidebarCollapsed && (
+                    <span
+                      title="按住拖移可換位"
+                      className="p-1 text-slate-300 group-hover:text-slate-500 cursor-grab active:cursor-grabbing shrink-0"
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
                     </span>
                   )}
-                  <span className="text-[11px] font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-semibold">
-                    {sysCounts.TODO_T || 0}
-                  </span>
+                  {renderCoreButton()}
+                  {!sidebarCollapsed && sidebarReorderMode && (
+                    <div className="flex items-center gap-0.5 pr-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={navIdx === 0}
+                        onClick={() => moveTopNavByOffset(navId, -1)}
+                        aria-label="上移"
+                        className="p-1 rounded hover:bg-slate-200 text-slate-600 disabled:opacity-30 cursor-pointer"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={navIdx === sidebarTopOrder.length - 1}
+                        onClick={() => moveTopNavByOffset(navId, 1)}
+                        aria-label="下移"
+                        className="p-1 rounded hover:bg-slate-200 text-slate-600 disabled:opacity-30 cursor-pointer"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSwitchSys('ORDER_STORE')}
-              className={`w-full flex items-center rounded-xl transition-colors cursor-pointer ${
-                sidebarCollapsed
-                  ? 'flex-col py-2.5 justify-center gap-1'
-                  : 'px-3 h-10 justify-between'
-              } ${
-                activeSys === 'ORDER_STORE'
-                  ? 'bg-amber-50 font-bold text-amber-950 border-l-4 border-amber-500'
-                  : 'hover:bg-slate-100 text-slate-700'
-              }`}
-            >
-              <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-3'}`}>
-                <ShoppingBag className="w-5 h-5 text-amber-600 shrink-0" />
-                <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm'}>
-                  AI 軟體訂購系統
-                </span>
-              </div>
-              {!sidebarCollapsed && (
-                <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">
-                  30天免費
-                </span>
-              )}
-            </button>
+              );
+            })}
 
             <hr className="my-2 border-slate-200" />
           </div>
 
-          {/* Sidebar Scroll Body: Unlocked Dual-Track Modules (M + T) + Controls */}
-          <div className="flex-1 overflow-y-auto px-2 pb-6 space-y-3">
+          {/* Sidebar Scroll Body: Draggable Unlocked + Custom Modules & Controls */}
+          <div className="flex-1 overflow-y-auto px-2 pb-6 space-y-2.5">
             {!sidebarCollapsed && (
-              <div className="px-2 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">
-                  已開通雙軌模組 ({unlockedPacks.length}/{INDUSTRY_PACKS.length})
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPackModalOpen(true)}
-                  className="text-[11px] font-semibold text-[#065fd4] hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <Sliders className="w-3 h-3" />
-                  <span>開通設定</span>
-                </button>
+              <div className="px-1.5 space-y-1.5">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-bold text-slate-500 truncate">
+                    我的 AI 選單 ({orderedSidebarPacks.length})
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setAddSidebarModalOpen(true)}
+                      className="px-2 py-1 rounded-lg bg-[#065fd4] hover:bg-blue-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>增項目</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSidebarReorderMode((v) => !v)}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                        sidebarReorderMode
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {sidebarReorderMode ? '完成' : '換位'}
+                    </button>
+                  </div>
+                </div>
+
+                {sidebarReorderMode ? (
+                  <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-[11px] text-blue-800">
+                    <span>拖移 ⋮⋮ 或點 ↑↓ 換位</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSidebarPackOrder([]);
+                        saveMemberSidebarPackOrder(memberMid, []);
+                        setSidebarTopOrder([...DEFAULT_SIDEBAR_TOP_ORDER]);
+                        saveMemberSidebarTopOrder(memberMid, [...DEFAULT_SIDEBAR_TOP_ORDER]);
+                        showToast('已恢復左側選單預設順序');
+                      }}
+                      className="font-bold text-[#065fd4] hover:underline inline-flex items-center gap-0.5 shrink-0 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>重設</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between px-0.5 text-[11px] text-slate-400">
+                    <span>可按住 ⋮⋮ 直接拖移換位</span>
+                    <button
+                      type="button"
+                      onClick={() => setPackModalOpen(true)}
+                      className="font-semibold text-[#065fd4] hover:underline flex items-center gap-0.5 cursor-pointer shrink-0"
+                    >
+                      <Sliders className="w-3 h-3" />
+                      <span>開通設定</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
-            <div className="space-y-2.5">
-              {INDUSTRY_PACKS.filter((p) => unlockedPacks.includes(p.baseKey)).map((pack) => {
-                const IconComp = getPackIcon(pack.baseKey);
+            <div className="space-y-2">
+              {orderedSidebarPacks.map((pack, packIdx) => {
+                const IconComp = pack.isCustom ? Layers : getPackIcon(pack.baseKey);
                 const mKey = `${pack.baseKey}_M`;
                 const tKey = `${pack.baseKey}_T`;
-                const mConf = SYS_CONFIG[mKey];
-                const tConf = SYS_CONFIG[tKey];
+                const mConf = resolveSysConf(mKey);
+                const tConf = resolveSysConf(tKey);
+                const isDragTarget = dragOverPackKey === pack.baseKey && draggedPackKey !== pack.baseKey;
+                const isBeingDragged = draggedPackKey === pack.baseKey;
 
                 return (
-                  <div key={pack.baseKey} className="space-y-0.5">
+                  <div
+                    key={pack.baseKey}
+                    draggable={!sidebarCollapsed}
+                    onDragStart={(e) => {
+                      setDraggedPackKey(pack.baseKey);
+                      setDraggedTopId(null);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', `PACK::${pack.baseKey}`);
+                    }}
+                    onDragOver={(e) => {
+                      if (!draggedPackKey) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverPackKey !== pack.baseKey) setDragOverPackKey(pack.baseKey);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverPackKey === pack.baseKey) setDragOverPackKey(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedPackKey && draggedPackKey !== pack.baseKey) {
+                        reorderPackKeys(draggedPackKey, pack.baseKey);
+                        showToast(`已調整「${pack.title}」選單順序！`);
+                      }
+                      setDraggedPackKey(null);
+                      setDragOverPackKey(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedPackKey(null);
+                      setDragOverPackKey(null);
+                    }}
+                    className={`rounded-xl transition-all space-y-0.5 ${
+                      isDragTarget
+                        ? 'ring-2 ring-[#065fd4] bg-blue-50/70 p-1'
+                        : sidebarReorderMode
+                        ? 'bg-slate-50/80 border border-slate-200 p-1'
+                        : ''
+                    } ${isBeingDragged ? 'opacity-45' : ''}`}
+                  >
                     {!sidebarCollapsed && (
-                      <div className="px-2.5 py-0.5 text-[11px] font-bold text-slate-400 flex items-center gap-1.5">
-                        <IconComp className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{pack.title}</span>
+                      <div className="px-1.5 py-0.5 text-[11px] font-bold text-slate-500 flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span
+                            title="按住拖移換位"
+                            className="text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing shrink-0"
+                          >
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </span>
+                          <IconComp className={`w-3.5 h-3.5 shrink-0 ${pack.iconColor || 'text-slate-500'}`} />
+                          <span className="truncate">{pack.title}</span>
+                          {pack.isCustom && (
+                            <span className="text-[10px] font-semibold text-indigo-600 shrink-0">
+                              · 自訂
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          {sidebarReorderMode && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={packIdx === 0}
+                                onClick={() => movePackByOffset(pack.baseKey, -1)}
+                                aria-label="上移項目"
+                                className="p-0.5 rounded hover:bg-slate-200 text-slate-600 disabled:opacity-30 cursor-pointer"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={packIdx === orderedSidebarPacks.length - 1}
+                                onClick={() => movePackByOffset(pack.baseKey, 1)}
+                                aria-label="下移項目"
+                                className="p-0.5 rounded hover:bg-slate-200 text-slate-600 disabled:opacity-30 cursor-pointer"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                          {pack.isCustom && sidebarReorderMode && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCustomSidebarModule(pack.baseKey, pack.title)}
+                              title="移除此自訂選單項目"
+                              className="p-0.5 rounded hover:bg-rose-100 text-rose-500 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
 
-                    {[mConf, tConf].filter(Boolean).map((conf) => {
+                    {[mConf, tConf].filter((c): c is SysModuleConfig => Boolean(c)).map((conf) => {
                       const isActive = activeSys === conf.key;
                       return (
                         <button
@@ -2040,7 +2518,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                               : 'px-3 h-9 justify-between'
                           } ${
                             isActive
-                              ? 'bg-slate-200/85 font-bold text-slate-900 border-l-4 border-[#065fd4]'
+                              ? 'bg-slate-200/85 font-bold text-slate-900'
                               : 'hover:bg-slate-100 text-slate-700'
                           }`}
                         >
@@ -2057,7 +2535,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                             </span>
                           </div>
                           {!sidebarCollapsed && (
-                            <span className="text-[11px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
+                            <span className="text-[11px] font-mono tabular-nums text-slate-500 shrink-0">
                               {sysCounts[conf.key] || 0}
                             </span>
                           )}
@@ -2070,17 +2548,37 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             </div>
 
             {sidebarCollapsed ? (
-              <button
-                type="button"
-                onClick={() => setPackModalOpen(true)}
-                title="開通 / 管理 10 大產業模組"
-                className="w-full py-2.5 rounded-xl bg-blue-50 text-[#065fd4] flex flex-col items-center justify-center gap-1 cursor-pointer"
-              >
-                <Sliders className="w-4 h-4" />
-                <span className="text-[10px] font-bold">模組</span>
-              </button>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setAddSidebarModalOpen(true)}
+                  title="新增左側選單項目"
+                  className="w-full py-2.5 rounded-xl bg-[#065fd4] text-white flex flex-col items-center justify-center gap-1 cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span className="text-[10px] font-bold">增項目</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPackModalOpen(true)}
+                  title="開通 / 管理 10 大產業模組"
+                  className="w-full py-2.5 rounded-xl bg-blue-50 text-[#065fd4] flex flex-col items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Sliders className="w-4 h-4" />
+                  <span className="text-[10px] font-bold">模組</span>
+                </button>
+              </div>
             ) : (
               <>
+                <button
+                  type="button"
+                  onClick={() => setAddSidebarModalOpen(true)}
+                  className="w-full py-2 px-3 rounded-xl border border-dashed border-slate-300 hover:border-[#065fd4] hover:bg-blue-50/50 text-slate-600 hover:text-[#065fd4] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span>新增自訂選單項目</span>
+                </button>
+
                 <hr className="border-slate-200" />
 
                 {/* 字體調節面板 */}
@@ -2316,7 +2814,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       >
                         全部 ({catChipCounts.ALL || 0})
                       </button>
-                      {activeConf.cats.map((cat) => (
+                      {activeDisplayCats.map((cat) => (
                         <button
                           key={cat}
                           type="button"
@@ -2380,27 +2878,29 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                           </span>
                         )}
                       </button>
-                      {unlockedPacks.map((base) => {
-                        const mKey = `${base}_M`;
-                        const tKey = `${base}_T`;
+                      {orderedSidebarPacks.map((pack) => {
+                        const mKey = `${pack.baseKey}_M`;
+                        const tKey = `${pack.baseKey}_T`;
+                        const mConf = resolveSysConf(mKey);
+                        const tConf = resolveSysConf(tKey);
                         return (
-                          <React.Fragment key={base}>
-                            {SYS_CONFIG[mKey] && (
+                          <React.Fragment key={pack.baseKey}>
+                            {mConf && (
                               <button
                                 type="button"
                                 onClick={() => handleSwitchSys(mKey)}
                                 className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-200/80 hover:bg-slate-300 text-slate-800 cursor-pointer"
                               >
-                                {SYS_CONFIG[mKey].name} ({sysCounts[mKey] || 0})
+                                {mConf.name} ({sysCounts[mKey] || 0})
                               </button>
                             )}
-                            {SYS_CONFIG[tKey] && (
+                            {tConf && (
                               <button
                                 type="button"
                                 onClick={() => handleSwitchSys(tKey)}
                                 className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-200/80 hover:bg-slate-300 text-slate-800 cursor-pointer"
                               >
-                                {SYS_CONFIG[tKey].name} ({sysCounts[tKey] || 0})
+                                {tConf.name} ({sysCounts[tKey] || 0})
                               </button>
                             )}
                           </React.Fragment>
@@ -2606,7 +3106,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       type="text"
                       value={orgSearchQuery}
                       onChange={(e) => setOrgSearchQuery(e.target.value)}
-                      placeholder="搜尋傘下節點 ID 或姓名 (例: C-25000516)"
+                      placeholder="搜尋傘下節點 ID 或姓名 (例: C-25000064)"
                       className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 text-xs focus:outline-none focus:border-[#065fd4]"
                     />
                   </div>
@@ -3045,7 +3545,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
               <h5 className="font-bold text-base text-slate-900 truncate">
                 {drawerMode === 'create'
-                  ? `新增：${SYS_CONFIG[formTargetSys]?.name || '專屬資料'}`
+                  ? `新增：${resolveSysConf(formTargetSys)?.name || '專屬資料'}`
                   : drawerMode === 'edit'
                   ? `編輯明細 (${drawerItem?.id})`
                   : `${drawerItem?.sysLabel} (${drawerItem?.id})`}
@@ -3078,7 +3578,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                   </div>
 
                   {/* Master -> Transaction Quick Jump Button */}
-                  {drawerItem.isMaster && (
+                  {drawerItem.isMaster && resolveSysConf(`${drawerItem.baseKey}_T`) && (
                     <button
                       type="button"
                       onClick={() => handleJumpMasterToTrack(drawerItem)}
@@ -3179,6 +3679,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       <img
                         src={formPhotoUrl}
                         alt="預覽圖片"
+                        referrerPolicy="no-referrer"
                         className="w-full object-cover"
                         style={{ aspectRatio: '4 / 3' }}
                       />
@@ -3195,16 +3696,18 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                         onChange={(e) => {
                           const next = e.target.value;
                           setFormTargetSys(next);
+                          setCustomSelectWriteMode({});
                           setFormValues(buildDefaultFormValues(next));
                         }}
                         className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#065fd4]"
                       >
                         {unlockedModuleKeys.map((k) => {
-                          const c = SYS_CONFIG[k];
-                          const pack = INDUSTRY_PACKS.find((p) => p.baseKey === c.baseKey);
+                          const c = resolveSysConf(k);
+                          if (!c) return null;
+                          const pack = orderedSidebarPacks.find((p) => p.baseKey === c.baseKey);
                           return (
                             <option key={k} value={k}>
-                              [{pack?.title}] {c.name}
+                              [{pack?.title || c.baseKey}] {c.name}
                             </option>
                           );
                         })}
@@ -3218,7 +3721,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                     onClick={() => setFormDrawerExpanded((v) => !v)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-sm font-bold text-slate-700 cursor-pointer"
                   >
-                    <span>動態模組表單欄位</span>
+                    <span>動態模組表單欄位（下拉亦可手寫）</span>
                     {formDrawerExpanded ? (
                       <ChevronUp className="w-4 h-4 text-slate-500" />
                     ) : (
@@ -3226,9 +3729,9 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                     )}
                   </button>
 
-                  {formDrawerExpanded && SYS_CONFIG[formTargetSys] && (
+                  {formDrawerExpanded && resolveSysConf(formTargetSys) && (
                     <div className="grid grid-cols-12 gap-3 pb-4">
-                      {SYS_CONFIG[formTargetSys].fields.map((field) => {
+                      {resolveSysConf(formTargetSys)!.fields.map((field) => {
                         // TCM_T Dynamic UI Rules
                         if (formTargetSys === 'TCM_T') {
                           const curSt = formValues['狀態'];
@@ -3248,29 +3751,107 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
                         const colSpanClass = field.half ? 'col-span-6' : 'col-span-12';
                         const val = formValues[field.id] ?? '';
+                        const selectCompositeKey = `${formTargetSys}::${field.id}`;
+                        const existingFieldVals =
+                          field.type === 'select'
+                            ? allModuleItems
+                                .filter((it) => it.sysType === formTargetSys)
+                                .map((it) => String(it.rawFields[field.id] || '').trim())
+                                .filter(Boolean)
+                            : [];
+                        const mergedSelectOpts =
+                          field.type === 'select'
+                            ? getMergedSelectOptions(
+                                memberMid,
+                                formTargetSys,
+                                field.id,
+                                field.options || [],
+                                existingFieldVals
+                              )
+                            : [];
+                        const isManualWriteMode =
+                          field.type === 'select' && Boolean(customSelectWriteMode[selectCompositeKey]);
+                        const cleanFieldLabel = field.label.replace(' 👈*', '').replace(' *', '').trim();
 
                         return (
                           <div key={field.id} className={colSpanClass}>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">
-                              {field.label}
-                            </label>
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <label className="block text-xs font-semibold text-slate-600 truncate">
+                                {field.label}
+                              </label>
+                              {field.type === 'select' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomSelectWriteMode((prev) => ({
+                                      ...prev,
+                                      [selectCompositeKey]: !prev[selectCompositeKey],
+                                    }));
+                                  }}
+                                  className="text-[11px] font-semibold text-[#065fd4] hover:underline inline-flex items-center gap-0.5 shrink-0 cursor-pointer whitespace-nowrap"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  <span>{isManualWriteMode ? '切回選單' : '手寫自訂'}</span>
+                                </button>
+                              )}
+                            </div>
+
                             {field.type === 'select' ? (
-                              <select
-                                value={val}
-                                onChange={(e) =>
-                                  setFormValues((prev) => ({
-                                    ...prev,
-                                    [field.id]: e.target.value,
-                                  }))
-                                }
-                                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#065fd4]"
-                              >
-                                {(field.options || []).map((opt) => (
-                                  <option key={opt} value={opt}>
-                                    {opt}
+                              isManualWriteMode ? (
+                                <div className="space-y-1">
+                                  <input
+                                    type="text"
+                                    value={val}
+                                    autoFocus
+                                    placeholder={`直接手寫輸入${cleanFieldLabel}...`}
+                                    onChange={(e) =>
+                                      setFormValues((prev) => ({
+                                        ...prev,
+                                        [field.id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full border border-[#065fd4] rounded-xl px-3 py-2 text-sm bg-blue-50/30 focus:outline-none focus:ring-2 focus:ring-[#065fd4]/20"
+                                  />
+                                  <p className="text-[10px] text-slate-500">
+                                    儲存後將自動記住此選項，下次可直接下拉點選
+                                  </p>
+                                </div>
+                              ) : (
+                                <select
+                                  value={val}
+                                  onChange={(e) => {
+                                    const picked = e.target.value;
+                                    if (picked === '__CUSTOM_WRITE__') {
+                                      setCustomSelectWriteMode((prev) => ({
+                                        ...prev,
+                                        [selectCompositeKey]: true,
+                                      }));
+                                      setFormValues((prev) => ({
+                                        ...prev,
+                                        [field.id]: '',
+                                      }));
+                                      return;
+                                    }
+                                    setFormValues((prev) => ({
+                                      ...prev,
+                                      [field.id]: picked,
+                                    }));
+                                  }}
+                                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#065fd4]"
+                                >
+                                  {val && !mergedSelectOpts.includes(val) && (
+                                    <option value={val}>{val}</option>
+                                  )}
+                                  {mergedSelectOpts.map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                  <option value="__CUSTOM_WRITE__">
+                                    ✏️ ＋ 自行手寫建檔...
                                   </option>
-                                ))}
-                              </select>
+                                </select>
+                              )
                             ) : field.type === 'textarea' ? (
                               <textarea
                                 rows={2}
@@ -3389,7 +3970,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
               </div>
             </div>
 
-            {findAmountFieldId(SYS_CONFIG[checkoutModalItem.sysType]) && (
+            {findAmountFieldId(resolveSysConf(checkoutModalItem.sysType)) && (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   請確認實收金額 (NTD) — 將立即算入今日與本月營收
@@ -3605,7 +4186,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       handleSwitchSys('BOOKING');
                     } else if (sysType === 'TODO_T') {
                       handleSwitchSys('TODO_BOARD');
-                    } else if (sysType in SYS_CONFIG) {
+                    } else if (resolveSysConf(sysType)) {
                       handleSwitchSys(sysType as ActiveSysKey);
                     }
                   }}
@@ -3768,14 +4349,14 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                     </div>
                   </div>
 
-                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
-                    <table className="w-full text-xs text-left">
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]">
+                    <table className="w-full min-w-[520px] text-xs text-left">
                       <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                         <tr>
-                          <th className="py-2 px-3">工作表分頁 (點擊查看內容)</th>
-                          <th className="py-2 px-3">資料筆數</th>
-                          <th className="py-2 px-3">狀態</th>
-                          <th className="py-2 px-3 text-right">檢視 / 續約</th>
+                          <th className="py-2 px-3 whitespace-nowrap">工作表分頁 (點擊查看內容)</th>
+                          <th className="py-2 px-3 whitespace-nowrap">資料筆數</th>
+                          <th className="py-2 px-3 whitespace-nowrap">狀態</th>
+                          <th className="py-2 px-3 text-right whitespace-nowrap">檢視 / 續約</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -3897,6 +4478,124 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         onChange={handleImageFileSelected}
         className="hidden"
       />
+
+      {/* ================= ADD CUSTOM SIDEBAR ITEM MODAL ================= */}
+      {addSidebarModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/55 backdrop-blur-xs"
+            onClick={() => setAddSidebarModalOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden text-slate-900">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FolderPlus className="w-5 h-5 text-[#065fd4]" />
+                <h5 className="font-bold text-base">新增左側選單項目</h5>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddSidebarModalOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                依您的個人或行業需求自由新增專屬左側選單項目；建立後可直接拖移換位、拍照建檔，且所有下拉分類均支援自行手寫擴充。
+              </p>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">
+                  選單項目名稱 *
+                </label>
+                <input
+                  type="text"
+                  value={newItemTitle}
+                  onChange={(e) => setNewItemTitle(e.target.value)}
+                  placeholder="例如：客戶售後紀錄、團購接單表、宮廟點燈名冊"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#065fd4]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">
+                  預設下拉分類選項（以逗號分隔，建檔時仍可手寫）
+                </label>
+                <input
+                  type="text"
+                  value={newItemCatsText}
+                  onChange={(e) => setNewItemCatsText(e.target.value)}
+                  placeholder="進行中, 待追蹤, 已完成"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#065fd4]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    主名稱欄位標題
+                  </label>
+                  <input
+                    type="text"
+                    value={newItemNameLabel}
+                    onChange={(e) => setNewItemNameLabel(e.target.value)}
+                    placeholder="姓名 / 品名 / 標題"
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[#065fd4]"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    圖示色系
+                  </label>
+                  <select
+                    value={newItemColor}
+                    onChange={(e) => setNewItemColor(e.target.value)}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#065fd4]"
+                  >
+                    <option value="text-indigo-600">靛藍色</option>
+                    <option value="text-emerald-600">翡翠綠</option>
+                    <option value="text-rose-600">玫瑰紅</option>
+                    <option value="text-amber-600">琥珀橘</option>
+                    <option value="text-sky-600">天空藍</option>
+                    <option value="text-violet-600">紫羅蘭</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-1 flex items-center justify-between gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddSidebarModalOpen(false);
+                    setPackModalOpen(true);
+                  }}
+                  className="text-xs font-semibold text-[#065fd4] hover:underline cursor-pointer"
+                >
+                  或開通內建 10 大產業模組 →
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddSidebarModalOpen(false)}
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateCustomSidebarModule}
+                    className="px-4 py-2 rounded-xl bg-[#065fd4] hover:bg-blue-700 text-white text-xs font-bold cursor-pointer shadow-xs"
+                  >
+                    建立並加入左側選單
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= FULLSCREEN LIGHTBOX ================= */}
       {lightboxSrc && (

@@ -206,7 +206,7 @@ export const BinaryTreeVisualizer: React.FC<BinaryTreeVisualizerProps> = ({
               <span>雙軌二元樹安置視覺化 (Binary Tree Explorer)</span>
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              以 <code className="text-amber-300 font-mono">C-25000001</code> 為定海神針頂點，開局自營 513 席永久鎖定，新會員第二組分身經由 BFS 智慧滑落排入二元樹。
+              以 <code className="text-amber-300 font-mono">C-25000001</code> 為定海神針頂點，公司自營 63 席（C-25000001 ~ C-25000063）永久鎖定不得轉讓，對外自 A-00064（C-25000064）起經由 BFS 智慧滑落排入二元樹。
             </p>
           </div>
 

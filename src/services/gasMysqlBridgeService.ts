@@ -559,11 +559,11 @@ USE \`${safeDb}\`;
 
 -- 1. 會員主檔 (對應 Sheets: 會員主檔)
 CREATE TABLE IF NOT EXISTS \`erp_members\` (
-  \`mid\` VARCHAR(32) NOT NULL COMMENT '會員編號 A-00001 / A-00001113',
+  \`mid\` VARCHAR(32) NOT NULL COMMENT '會員編號 A-00001~A-00063 公司自營 / A-00064 起對外開放',
   \`name\` VARCHAR(120) NOT NULL,
   \`phone\` VARCHAR(40) DEFAULT '',
   \`id_number_masked\` VARCHAR(32) DEFAULT '',
-  \`sponsor_mid\` VARCHAR(32) NOT NULL DEFAULT 'A-00001113',
+  \`sponsor_mid\` VARCHAR(32) NOT NULL DEFAULT 'A-00008',
   \`store_id\` VARCHAR(40) DEFAULT 'S-TAIPEI-01',
   \`center_id\` VARCHAR(40) DEFAULT 'EDU-GLOBAL-01',
   \`registered_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -680,7 +680,7 @@ CREATE TABLE IF NOT EXISTS \`erp_gas_sync_meta\` (
 
 -- 8. GAS 高頻查詢同步緩存與臨時索引表 (Sheets O(1) 檢索加速)
 CREATE TABLE IF NOT EXISTS \`erp_query_cache_index\` (
-  \`cache_key\` VARCHAR(128) NOT NULL COMMENT '索引鍵 (如 IDX:MEMBER:A-00001113)',
+  \`cache_key\` VARCHAR(128) NOT NULL COMMENT '索引鍵 (如 IDX:MEMBER:A-00064)',
   \`entity_type\` VARCHAR(32) NOT NULL COMMENT 'MEMBER / MONOLINE_NODE / BINARY_NODE / SUBTREE / SYSTEM_STATS / TODO',
   \`lookup_token\` VARCHAR(128) NOT NULL COMMENT '標準化檢索詞 (MID / NodeID / 手機)',
   \`primary_mid\` VARCHAR(32) DEFAULT '',

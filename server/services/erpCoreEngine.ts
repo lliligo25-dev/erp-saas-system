@@ -41,18 +41,55 @@ export const GLOBAL_BOUNDARIES = {
   SYSTEM_TARGET_MARKET: '台灣全齡人口 0~100 歲全民互助生態',
   CURRENCY_UNIT: '新台幣 (NTD)',
   RENTAL_FEE: 100, // 100 元/月/單位 = 100 點
-  MONOLINE_MID_RANGE: 'A-00000001 ~ A-25000000',
+  MONOLINE_MID_RANGE: 'A-00001 ~ A-25000000',
   BINARY_START_MID: 'A-25000001',
-  MONOLINE_NODE_RANGE: 'C-00000001 ~ C-25000000',
+  MONOLINE_NODE_RANGE: 'C-00001 ~ C-25000000',
   BINARY_ROOT_NODE_ID: 'C-25000001',
-  BINARY_START_POOL_RANGE: 'C-25000002 ~ C-25000514', // 513 席自營節點 (包含定海神針共514)
-  BINARY_START_POOL_COUNT: 514,
-  FLAGSHIP_SPONSOR_MID: 'A-00001113', // 第 6 代旗艦領袖
+  BINARY_START_POOL_RANGE: 'C-25000001 ~ C-25000063', // 63 席公司自營系統不得轉讓 (單雙軌起點)
+  BINARY_START_POOL_COUNT: 63,
+  HQ_LOCKED_MAX_SEQ: 63, // A-00001 ~ A-00063 公司自營系統不得轉讓
+  PUBLIC_OPEN_START_SEQ: 64, // A-00064 起對外開放
+  FLAGSHIP_SPONSOR_MID: 'A-00008', // 永吉家族直推起點 (公司自營 #08，由 A-00007 直推)
   TRIAL_SOFTWARE_QTY: 2,
   TRIAL_DAYS: 30,
 };
 
+const CURRENT_SCHEMA_VERSION = 'HQ63_YONGJI_V2';
 const STORAGE_KEY = 'SAAS_ERP_STATE_V1';
+export const DEFAULT_SHEET_PHOTO_URL =
+  'https://drive.google.com/thumbnail?sz=w800&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ';
+
+export function isHqNonTransferableMid(rawMid: string): boolean {
+  const m = String(rawMid || '').trim().toUpperCase();
+  if (!/^A-\d+$/.test(m)) return false;
+  const n = parseInt(m.slice(2), 10);
+  return !isNaN(n) && n >= 1 && n <= GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+}
+
+export function isHqNonTransferableNodeId(rawNodeId: string): boolean {
+  const nid = String(rawNodeId || '').trim().toUpperCase();
+  if (!/^C-\d+$/.test(nid)) return false;
+  const n = parseInt(nid.slice(2), 10);
+  if (isNaN(n)) return false;
+  return (
+    (n >= 1 && n <= GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ) ||
+    (n >= 25000001 && n <= 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ)
+  );
+}
+
+function getHqDirectSponsorMid(seq: number): string {
+  if (seq <= 1) return 'HQ_ROOT';
+  if (seq <= 7) return `A-${String(seq - 1).padStart(5, '0')}`;
+  return 'A-00007'; // A-00007 直推 A-00008 ~ A-00063
+}
+
+const YONGJI_FAMILY_SEED: Array<{ seq: number; name: string; sponsorMid: string }> = [
+  { seq: 64, name: '李永吉', sponsorMid: 'A-00008' },
+  { seq: 65, name: '李佳馨', sponsorMid: 'A-00008' },
+  { seq: 66, name: '林美珍', sponsorMid: 'A-00008' },
+  { seq: 67, name: '李皇穎', sponsorMid: 'A-00008' },
+  { seq: 68, name: '李孟馨', sponsorMid: 'A-00008' },
+];
 
 export class ERPEngine {
   private members: Map<string, Member> = new Map();
@@ -89,8 +126,8 @@ export class ERPEngine {
   private memberWorkspacePacks: Map<string, string[]> = new Map();
   private memberWorkspaceRecords: Map<string, Record<string, Array<Record<string, any>>>> = new Map();
 
-  private currentMonolineCounter: number = 0; // 新會員入會從 A-00001 建檔 (0 -> 首位為 1)
-  private currentBinaryCounter: number = 25000514; // 開局池至 25000514
+  private currentMonolineCounter: number = 68; // A-00001~A-00063 公司自營不得轉讓；A-00064~A-00068 永吉家族已建檔
+  private currentBinaryCounter: number = 25000068; // C-25000001~C-25000063 公司自營；C-25000064~C-25000068 永吉家族
   private currentContactCounter: number = 0;
   private currentTrackingCounter: number = 0;
   private currentEventCounter: number = 0;
@@ -108,7 +145,7 @@ export class ERPEngine {
   }
 
   /**
-   * 初始化系統：建立雙軌定海神針與 513 席雙軌開局池，新會員入會統一從 A-00001 起始建檔
+   * 初始化系統：建立公司自營 63 席永久鎖定體系 (A-00001~A-00063 / C-00001~C-00063 / C-25000001~C-25000063) 與永吉家族 (A-00064~A-00068)
    */
   public initializeSystem(forceReset: boolean = false) {
     if (!forceReset) {
@@ -154,8 +191,14 @@ export class ERPEngine {
           }
 
           this.settlements = parsed.settlements || [];
-          this.currentMonolineCounter = (parsed.currentMonolineCounter >= 1113) ? 0 : (parsed.currentMonolineCounter || 0);
-          this.currentBinaryCounter = parsed.currentBinaryCounter || 25000514;
+          this.currentMonolineCounter = Math.max(
+            GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ,
+            Number(parsed.currentMonolineCounter || 0)
+          );
+          this.currentBinaryCounter = Math.max(
+            25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ,
+            Number(parsed.currentBinaryCounter || 25000063)
+          );
           this.currentContactCounter = parsed.currentContactCounter || this.contacts.size;
           this.currentTrackingCounter = parsed.currentTrackingCounter || this.contactTrackings.size;
           this.currentEventCounter = parsed.currentEventCounter || this.events.size;
@@ -173,7 +216,14 @@ export class ERPEngine {
             this.memberWorkspaceRecords = new Map(parsed.memberWorkspaceRecords);
           }
 
-          if (this.purgeLegacyVirtualDemoData()) {
+          let mutated = this.purgeLegacyVirtualDemoData();
+          if (parsed.schemaVersion !== CURRENT_SCHEMA_VERSION) {
+            this.ensureHq63AndYongjiSeed(true);
+            mutated = true;
+          } else {
+            this.ensureHq63AndYongjiSeed(false);
+          }
+          if (mutated) {
             this.saveState();
           }
           return;
@@ -199,8 +249,8 @@ export class ERPEngine {
     this.initSampleStores();
     this.initSampleCenters();
     this.initDefaultPublicEvents();
-    this.currentMonolineCounter = 0; // 正式純淨開局：零虛擬會員，第一位真實會員從 A-00001 建檔
-    this.currentBinaryCounter = 25000514;
+    this.currentMonolineCounter = GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+    this.currentBinaryCounter = 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
     this.currentContactCounter = 0;
     this.currentTrackingCounter = 0;
     this.currentEventCounter = this.events.size;
@@ -211,92 +261,318 @@ export class ERPEngine {
     this.abanyTechAccumulated = 0;
     this.hqOpsAccumulated = 0;
 
+    // 建立公司自營系統 63 席 (A-00001 ~ A-00063 不得轉讓) + 對外開放永吉家族 (A-00064 ~ A-00068)
+    this.ensureHq63AndYongjiSeed(true);
+    this.saveState();
+  }
+
+  /**
+   * 確保 63 席公司自營系統席位（A-00001~A-00063 不得轉讓，直推鏈 1→2→3→4→5→6→7→8~63）
+   * 與永吉家族起始建檔資料（A-00064~A-00068，皆由 A-00008 直推）完整就位
+   */
+  private ensureHq63AndYongjiSeed(forceRebuildHqAndYongji: boolean = false) {
     const now = new Date();
-    const expiry = new Date(now.getTime() + 365 * 24 * 3600 * 1000).toISOString();
+    const permanentExpiry = '2099-12-31T15:59:59.000Z';
+    const trialExpiry = new Date(now.getTime() + GLOBAL_BOUNDARIES.TRIAL_DAYS * 24 * 3600 * 1000).toISOString();
 
-    // 旗艦領袖 A-00001113 (總直推推薦錨點)
-    const flagshipMid = GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
-    this.members.set(flagshipMid, {
-      mid: flagshipMid,
-      name: '第 6 代旗艦領袖 (總直推錨點)',
-      phone: '0988-001-113',
-      idNumberMasked: 'A123***113',
-      sponsorMid: 'HQ_ROOT',
-      storeId: 'S-HQ-01',
-      centerId: 'EDU-HQ-01',
-      registeredAt: now.toISOString(),
-      trialExpiresAt: expiry,
-      accumulatedRentAmount: 0,
-      monolineNodeId: 'C-00000',
-      binaryNodeId: 'C-25000001',
-      cloudFolderId: `GDRV-${flagshipMid.replace(/[^A-Z0-9]/gi, '')}`,
-      cloudFolderName: `【AIS-ERP 會員雲端】${flagshipMid} 第 6 代旗艦領袖`,
-      cloudFolderUrl: `https://drive.google.com/drive/folders/GDRV-${flagshipMid.replace(/[^A-Z0-9]/gi, '')}`,
-      cloudSpreadsheetId: `GSHEET-${flagshipMid.replace(/[^A-Z0-9]/gi, '')}`,
-      cloudSpreadsheetName: `${flagshipMid}_第 6 代旗艦領袖_AI軟體專屬試算表`,
-      cloudSpreadsheetUrl: `https://docs.google.com/spreadsheets/d/GSHEET-${flagshipMid.replace(/[^A-Z0-9]/gi, '')}`,
-    });
+    // 1. 移除舊版 514 席佔位池與 A-00001113 舊錨點
+    if (this.members.has('A-00001113')) {
+      this.members.delete('A-00001113');
+    }
+    for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
+      const bNum = parseInt(nid.replace(/^C-/, ''), 10);
+      if (
+        node.mid === 'A-00001113' ||
+        (node.type === 'BINARY_HQ_POOL' && !isNaN(bNum) && bNum > 25000063)
+      ) {
+        const parent = this.binaryNodes.get(node.parentId);
+        if (parent) {
+          if (parent.leftChildId === nid) parent.leftChildId = undefined;
+          if (parent.rightChildId === nid) parent.rightChildId = undefined;
+        }
+        this.binaryNodes.delete(nid);
+      }
+    }
 
-    // 2. 初始化雙軌定海神針與開局自營節點池 (C-25000001 ~ C-25000514 共 514 個節點)
-    // C-25000001 為根節點 (Depth = 0)
-    const rootNodeId = GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID;
-    this.binaryNodes.set(rootNodeId, {
-      nodeId: rootNodeId,
-      mid: flagshipMid,
-      name: '雙軌定海神針 (Binary Root Node)',
-      type: 'BINARY_ROOT',
-      track: 'BINARY',
-      status: 'HQ_LOCKED',
-      parentId: 'SYSTEM_ROOT',
-      placementPosition: 'ROOT',
-      depth: 0,
-      sponsorMid: flagshipMid,
-      hqPermanentLocked: true,
-      trialExpiresAt: expiry,
-      totalEarnings: 0,
-    });
-
-    // 依滿二元樹數學公式依序滑落安置 (以 1-based index: root = 1, 左子 = 2k, 右子 = 2k+1)
-    // 節點 C-25000001 (index 1)
-    // 節點 C-25000002 ~ C-25000514 (index 2 ~ 514)
-    for (let i = 2; i <= 514; i++) {
-      const nodeId = `C-2500${String(i).padStart(4, '0')}`;
-      const parentIndex = Math.floor(i / 2);
-      const parentNodeId = `C-2500${String(parentIndex).padStart(4, '0')}`;
-      const isLeft = i % 2 === 0;
-      const depth = Math.floor(Math.log2(i));
-
-      // 建立節點
-      const nodeRecord: NodeRecord = {
-        nodeId,
-        mid: flagshipMid,
-        name: `雙軌開局自營節點 #${i} (HQ Pool)`,
-        type: 'BINARY_HQ_POOL',
-        track: 'BINARY',
-        status: 'HQ_LOCKED',
-        parentId: parentNodeId,
-        placementPosition: isLeft ? 'L' : 'R',
-        depth,
-        sponsorMid: flagshipMid, // 100% 由旗艦領袖 A-00001113 親推
-        hqPermanentLocked: true,
-        trialExpiresAt: expiry,
-        totalEarnings: 0,
-      };
-      this.binaryNodes.set(nodeId, nodeRecord);
-
-      // 連結父節點之 leftChildId / rightChildId
-      const parent = this.binaryNodes.get(parentNodeId);
-      if (parent) {
-        if (isLeft) {
-          parent.leftChildId = nodeId;
-        } else {
-          parent.rightChildId = nodeId;
+    // 若強制重建，清除舊有 A-00001~A-00063 舊測試紀錄以免與公司自營 63 席衝突
+    if (forceRebuildHqAndYongji) {
+      for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
+        const bNum = parseInt(nid.replace(/^C-/, ''), 10);
+        if (!isNaN(bNum) && bNum >= 25000001 && bNum <= 25000063) {
+          this.binaryNodes.delete(nid);
         }
       }
     }
 
-    // 3. 正式純淨營運模式：不預先建立虛擬範例會員（王大明等），等待 Google 試算表回讀或真實會員開通
-    this.saveState();
+    // 2. 建立／鎖定公司自營系統 63 席：A-00001 ~ A-00063（單軌 C-00001~C-00063、雙軌 C-25000001~C-25000063）
+    for (let i = 1; i <= GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ; i++) {
+      const mid = `A-${String(i).padStart(5, '0')}`;
+      const monoId = `C-${String(i).padStart(5, '0')}`;
+      const biId = `C-${String(25000000 + i).padStart(8, '0')}`;
+      const sponsorMid = getHqDirectSponsorMid(i);
+      const cleanMid = mid.replace(/[^A-Z0-9]/gi, '');
+      const labelNum = String(i).padStart(2, '0');
+      const hqName =
+        i === 1
+          ? '公司自營 #01 (單雙軌定海神針 · 不得轉讓)'
+          : i === 7
+          ? '公司自營 #07 (直推 A-00008~A-00063 · 不得轉讓)'
+          : i === 8
+          ? '公司自營 #08 (永吉家族直推起點 · 不得轉讓)'
+          : `公司自營 #${labelNum} (公司自營系統 · 不得轉讓)`;
+
+      const existingMember = this.members.get(mid);
+      this.members.set(mid, {
+        ...(existingMember || {}),
+        mid,
+        name: forceRebuildHqAndYongji || !existingMember?.name ? hqName : existingMember.name,
+        phone: existingMember?.phone || `0900-000-${String(i).padStart(3, '0')}`,
+        idNumberMasked: existingMember?.idNumberMasked || `HQ***${String(i).padStart(3, '0')}`,
+        sponsorMid,
+        storeId: existingMember?.storeId || 'S-HQ-01',
+        centerId: existingMember?.centerId || 'EDU-HQ-01',
+        registeredAt: existingMember?.registeredAt || now.toISOString(),
+        trialExpiresAt: permanentExpiry,
+        accumulatedRentAmount: existingMember?.accumulatedRentAmount ?? 0,
+        monolineNodeId: monoId,
+        binaryNodeId: biId,
+        cloudFolderId: existingMember?.cloudFolderId || `GDRV-${cleanMid}`,
+        cloudFolderName: existingMember?.cloudFolderName || `【AIS-ERP 會員雲端】${mid} ${hqName}`,
+        cloudFolderUrl: existingMember?.cloudFolderUrl || `https://drive.google.com/drive/folders/GDRV-${cleanMid}`,
+        cloudSpreadsheetId: existingMember?.cloudSpreadsheetId || `GSHEET-${cleanMid}`,
+        cloudSpreadsheetName: existingMember?.cloudSpreadsheetName || `${mid}_${hqName}_AI軟體專屬試算表`,
+        cloudSpreadsheetUrl:
+          existingMember?.cloudSpreadsheetUrl || `https://docs.google.com/spreadsheets/d/GSHEET-${cleanMid}`,
+      });
+
+      const prevMonoId = i === 1 ? 'HQ_ROOT' : `C-${String(i - 1).padStart(5, '0')}`;
+      const existingMono = this.monolineNodes.get(monoId);
+      this.monolineNodes.set(monoId, {
+        ...(existingMono || {}),
+        nodeId: monoId,
+        mid,
+        name: `${hqName} (單軌起點)`,
+        type: 'MONOLINE',
+        track: 'MONOLINE',
+        status: 'HQ_LOCKED',
+        parentId: prevMonoId,
+        placementPosition: 'MONOLINE_QUEUE',
+        depth: i,
+        sponsorMid,
+        hqPermanentLocked: true,
+        trialExpiresAt: permanentExpiry,
+        totalEarnings: existingMono?.totalEarnings ?? 0,
+        softwareKey: 'CONTACT',
+        softwareTitle: '公司自營單軌起點 (不得轉讓)',
+      });
+
+      const parentIndex = Math.floor(i / 2);
+      const parentBiId = i === 1 ? 'SYSTEM_ROOT' : `C-${String(25000000 + parentIndex).padStart(8, '0')}`;
+      const isLeft = i % 2 === 0;
+      const depth = i === 1 ? 0 : Math.floor(Math.log2(i));
+      const existingBi = this.binaryNodes.get(biId);
+      this.binaryNodes.set(biId, {
+        ...(existingBi || {}),
+        nodeId: biId,
+        mid,
+        name: i === 1 ? '雙軌定海神針 C-25000001 (A-00001 · 不得轉讓)' : `${hqName} (雙軌起點)`,
+        type: i === 1 ? 'BINARY_ROOT' : 'BINARY_HQ_POOL',
+        track: 'BINARY',
+        status: 'HQ_LOCKED',
+        parentId: parentBiId,
+        placementPosition: i === 1 ? 'ROOT' : isLeft ? 'L' : 'R',
+        depth,
+        leftChildId: existingBi?.leftChildId,
+        rightChildId: existingBi?.rightChildId,
+        sponsorMid,
+        hqPermanentLocked: true,
+        trialExpiresAt: permanentExpiry,
+        totalEarnings: existingBi?.totalEarnings ?? 0,
+        softwareKey: 'EVENT',
+        softwareTitle: '公司自營雙軌起點 (不得轉讓)',
+      });
+
+      if (i > 1) {
+        const parentNode = this.binaryNodes.get(parentBiId);
+        if (parentNode) {
+          if (isLeft) parentNode.leftChildId = biId;
+          else parentNode.rightChildId = biId;
+        }
+      }
+    }
+
+    // 3. 建立對外開放起點 A-00064 起之已建檔資料：永吉家族 (皆由 A-00008 直推)
+    for (const entry of YONGJI_FAMILY_SEED) {
+      const mid = `A-${String(entry.seq).padStart(5, '0')}`;
+      const monoId = `C-${String(entry.seq).padStart(5, '0')}`;
+      const biId = `C-${String(25000000 + entry.seq).padStart(8, '0')}`;
+      const contactIdx = entry.seq - 63; // 1..5
+      const contactId = `CM-${String(contactIdx).padStart(5, '0')}`;
+      const trackingId = `CT-${String(contactIdx).padStart(5, '0')}`;
+      const cleanMid = mid.replace(/[^A-Z0-9]/gi, '');
+
+      const existingMem = this.members.get(mid);
+      if (!existingMem || forceRebuildHqAndYongji) {
+        this.members.set(mid, {
+          ...(existingMem || {}),
+          mid,
+          name: existingMem?.name && !forceRebuildHqAndYongji ? existingMem.name : entry.name,
+          phone: existingMem?.phone || '',
+          tel: existingMem?.tel || '',
+          line: existingMem?.line || '',
+          email: existingMem?.email || '',
+          address: existingMem?.address || '永吉家族',
+          photoUrl:
+            existingMem?.photoUrl && !existingMem.photoUrl.includes('images.unsplash.com')
+              ? existingMem.photoUrl
+              : DEFAULT_SHEET_PHOTO_URL,
+          idNumberMasked: existingMem?.idNumberMasked || '',
+          sponsorMid: entry.sponsorMid,
+          storeId: existingMem?.storeId || 'S-TAIPEI-01',
+          centerId: existingMem?.centerId || 'EDU-GLOBAL-01',
+          registeredAt: existingMem?.registeredAt || now.toISOString(),
+          trialExpiresAt: existingMem?.trialExpiresAt || trialExpiry,
+          accumulatedRentAmount: existingMem?.accumulatedRentAmount ?? 0,
+          monolineNodeId: monoId,
+          binaryNodeId: biId,
+          contactId: existingMem?.contactId || contactId,
+          cloudFolderId: existingMem?.cloudFolderId || `GDRV-${cleanMid}`,
+          cloudFolderName: existingMem?.cloudFolderName || `【AIS-ERP 會員雲端】${mid} ${entry.name}`,
+          cloudFolderUrl: existingMem?.cloudFolderUrl || `https://drive.google.com/drive/folders/GDRV-${cleanMid}`,
+          cloudSpreadsheetId: existingMem?.cloudSpreadsheetId || `GSHEET-${cleanMid}`,
+          cloudSpreadsheetName: existingMem?.cloudSpreadsheetName || `${mid}_${entry.name}_AI軟體專屬試算表`,
+          cloudSpreadsheetUrl:
+            existingMem?.cloudSpreadsheetUrl || `https://docs.google.com/spreadsheets/d/GSHEET-${cleanMid}`,
+        });
+        initNewMemberDefaultPacks(mid);
+      }
+
+      if (!this.monolineNodes.has(monoId) || forceRebuildHqAndYongji) {
+        const prevMonoId = `C-${String(entry.seq - 1).padStart(5, '0')}`;
+        this.monolineNodes.set(monoId, {
+          nodeId: monoId,
+          mid,
+          name: `${entry.name} (永吉家族 · 單軌)`,
+          type: 'MONOLINE',
+          track: 'MONOLINE',
+          status: 'TRIAL_ACTIVE',
+          parentId: prevMonoId,
+          placementPosition: 'MONOLINE_QUEUE',
+          depth: entry.seq,
+          sponsorMid: entry.sponsorMid,
+          hqPermanentLocked: false,
+          trialExpiresAt: trialExpiry,
+          totalEarnings: 0,
+          softwareKey: 'CONTACT',
+          softwareTitle: '通訊錄 CRM (1+1單軌)',
+        });
+      }
+
+      if (!this.binaryNodes.has(biId) || forceRebuildHqAndYongji) {
+        const parentIndex = Math.floor(entry.seq / 2);
+        const parentBiId = `C-${String(25000000 + parentIndex).padStart(8, '0')}`;
+        const isLeft = entry.seq % 2 === 0;
+        const depth = Math.floor(Math.log2(entry.seq));
+        this.binaryNodes.set(biId, {
+          nodeId: biId,
+          mid,
+          name: `${entry.name} (永吉家族 · 雙軌)`,
+          type: 'BINARY_MEMBER_SLOT',
+          track: 'BINARY',
+          status: 'TRIAL_ACTIVE',
+          parentId: parentBiId,
+          placementPosition: isLeft ? 'L' : 'R',
+          depth,
+          sponsorMid: entry.sponsorMid,
+          hqPermanentLocked: false,
+          trialExpiresAt: trialExpiry,
+          totalEarnings: 0,
+          softwareKey: 'EVENT',
+          softwareTitle: '活動行銷 (1+1雙軌)',
+        });
+        const parentBi = this.binaryNodes.get(parentBiId);
+        if (parentBi) {
+          if (isLeft) parentBi.leftChildId = biId;
+          else parentBi.rightChildId = biId;
+        }
+      }
+
+      if (!this.contacts.has(contactId)) {
+        this.contacts.set(contactId, {
+          id: contactId,
+          status: '開通AI軟體1+1',
+          name: entry.name,
+          phone: '',
+          tel: '',
+          line: '',
+          email: '',
+          address: '永吉家族',
+          photoUrl: DEFAULT_SHEET_PHOTO_URL,
+          updatedAt: now.toISOString(),
+          ownerMid: entry.sponsorMid,
+          memberMid: mid,
+          monolineNodeId: monoId,
+          binaryNodeId: biId,
+        });
+      } else {
+        const existingContact = this.contacts.get(contactId)!;
+        if (!existingContact.photoUrl || existingContact.photoUrl.includes('images.unsplash.com')) {
+          existingContact.photoUrl = DEFAULT_SHEET_PHOTO_URL;
+        }
+      }
+
+      if (!this.contactTrackings.has(trackingId)) {
+        this.contactTrackings.set(trackingId, {
+          id: trackingId,
+          status: '開通體驗',
+          name: entry.name,
+          contactDate: now.toISOString().split('T')[0],
+          contactMethod: '永吉家族起始建檔',
+          discussionContent: `永吉家族正式對外開放首發建檔（推薦人 ${entry.sponsorMid} → ${mid} ${entry.name}，單軌 ${monoId} / 雙軌 ${biId}）`,
+          nextStepPlan: '使用個人專屬 AI 工作區與即時試算表檢視功能',
+          photoUrl: DEFAULT_SHEET_PHOTO_URL,
+          updatedAt: now.toISOString(),
+          contactId,
+          ownerMid: entry.sponsorMid,
+          memberMid: mid,
+        });
+      } else {
+        const existingTracking = this.contactTrackings.get(trackingId)!;
+        if (!existingTracking.photoUrl || existingTracking.photoUrl.includes('images.unsplash.com')) {
+          existingTracking.photoUrl = DEFAULT_SHEET_PHOTO_URL;
+        }
+      }
+    }
+
+    // 同步將既有的空白或舊預設圖庫照片統一更新為新版試算表預設圖片
+    for (const c of this.contacts.values()) {
+      if (!c.photoUrl || c.photoUrl.includes('images.unsplash.com')) {
+        c.photoUrl = DEFAULT_SHEET_PHOTO_URL;
+      }
+    }
+    for (const t of this.contactTrackings.values()) {
+      if (!t.photoUrl || t.photoUrl.includes('images.unsplash.com')) {
+        t.photoUrl = DEFAULT_SHEET_PHOTO_URL;
+      }
+    }
+    for (const e of this.events.values()) {
+      if (!e.photoUrl || e.photoUrl.includes('images.unsplash.com')) {
+        e.photoUrl = DEFAULT_SHEET_PHOTO_URL;
+      }
+    }
+    for (const et of this.eventTrackings.values()) {
+      if (!et.photoUrl || et.photoUrl.includes('images.unsplash.com')) {
+        et.photoUrl = DEFAULT_SHEET_PHOTO_URL;
+      }
+    }
+
+    this.recomputeCounters();
+    if (this.currentContactCounter < YONGJI_FAMILY_SEED.length) {
+      this.currentContactCounter = YONGJI_FAMILY_SEED.length;
+    }
+    if (this.currentTrackingCounter < YONGJI_FAMILY_SEED.length) {
+      this.currentTrackingCounter = YONGJI_FAMILY_SEED.length;
+    }
   }
 
   /**
@@ -363,26 +639,25 @@ export class ERPEngine {
   }
 
   private recomputeCounters() {
-    let maxMono = 0;
+    let maxMono = GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
     for (const m of this.members.values()) {
       const mNum = parseInt(m.mid.replace(/^A-/, ''), 10);
-      if (!isNaN(mNum) && mNum !== 1113 && mNum < 25000000 && mNum > maxMono) {
+      if (!isNaN(mNum) && mNum !== 1113 && mNum <= 25000000 && mNum > maxMono) {
         maxMono = mNum;
       }
     }
     for (const n of this.monolineNodes.values()) {
       const cNum = parseInt(n.nodeId.replace(/^C-/, ''), 10);
-      if (!isNaN(cNum) && cNum !== 1113 && cNum < 25000000 && cNum > maxMono) {
+      if (!isNaN(cNum) && cNum !== 1113 && cNum <= 25000000 && cNum > maxMono) {
         maxMono = cNum;
       }
     }
     this.currentMonolineCounter = maxMono;
 
-    const hasHqPool = Array.from(this.binaryNodes.values()).some((n) => n.type === 'BINARY_HQ_POOL');
-    let maxBi = hasHqPool ? 25000514 : 25000001;
+    let maxBi = 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
     for (const n of this.binaryNodes.values()) {
       const bNum = parseInt(n.nodeId.replace(/^C-/, ''), 10);
-      if (!isNaN(bNum) && bNum > maxBi) {
+      if (!isNaN(bNum) && bNum >= 25000001 && bNum > maxBi) {
         maxBi = bNum;
       }
     }
@@ -422,86 +697,6 @@ export class ERPEngine {
     }
   }
 
-  private seedInitialDemoMembers() {
-    const now = new Date();
-    const trialExp = new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString();
-    const demos = [
-      { mid: 'A-00001', mono: 'C-00001', bi: 'C-25000515', name: '王大明', phone: '0912-345-678', tel: '02-2771-9900', line: 'wang_daming', email: 'daming.wang@example.com', address: '台北市大安區忠孝東路四段 128 號 12 樓', sponsor: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID, store: 'S-TAIPEI-01', center: 'EDU-TAIPEI-01', cm: 'CM-00001' },
-      { mid: 'A-00002', mono: 'C-00002', bi: 'C-25000516', name: '李美華', phone: '0922-666-888', tel: '02-8951-8822', line: 'meihua_lee', email: 'meihua.lee@example.com', address: '新北市板橋區文化路一段 190 號 6 樓', sponsor: 'A-00001', store: 'S-BANQIAO-01', center: 'EDU-BANQIAO-01', cm: 'CM-00002' },
-      { mid: 'A-00003', mono: 'C-00003', bi: 'C-25000517', name: '張志豪', phone: '0933-555-777', tel: '03-316-6699', line: 'chihhao_chang', email: 'chihhao@example.com', address: '桃園市桃園區中正路 1190 號 8 樓', sponsor: 'A-00002', store: 'S-TAOYUAN-01', center: 'EDU-TAOYUAN-01', cm: 'CM-00003' },
-      { mid: 'A-00004', mono: 'C-00004', bi: 'C-25000518', name: '陳冠宇', phone: '0955-123-987', tel: '04-2258-7733', line: 'kuanyu_chen', email: 'kuanyu@example.com', address: '台中市西屯區市政北二路 240 號 15 樓', sponsor: 'A-00003', store: 'S-TAICHUNG-01', center: 'EDU-TAICHUNG-01', cm: 'CM-00004' },
-    ];
-
-    demos.forEach((d, idx) => {
-      const seq = idx + 1;
-      const prevMono = seq === 1 ? 'HQ_ROOT' : `C-${String(seq - 1).padStart(5, '0')}`;
-      this.monolineNodes.set(d.mono, {
-        nodeId: d.mono,
-        mid: d.mid,
-        name: `${d.name} (第1組-單軌體驗)`,
-        type: 'MONOLINE',
-        track: 'MONOLINE',
-        status: 'TRIAL_ACTIVE',
-        parentId: prevMono,
-        placementPosition: 'MONOLINE_QUEUE',
-        depth: seq,
-        sponsorMid: d.sponsor,
-        hqPermanentLocked: false,
-        trialExpiresAt: trialExp,
-        totalEarnings: seq === 1 ? 18 : 6,
-        softwareKey: 'CONTACT',
-        softwareTitle: '通訊錄 CRM (1+1單軌)',
-      });
-
-      const placement = this.findNextAvailableBinaryPlacement(GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID);
-      const parentBi = this.binaryNodes.get(placement.parentId);
-      this.binaryNodes.set(d.bi, {
-        nodeId: d.bi,
-        mid: d.mid,
-        name: `${d.name} (第2組-雙軌分身)`,
-        type: 'BINARY_MEMBER_SLOT',
-        track: 'BINARY',
-        status: 'TRIAL_ACTIVE',
-        parentId: placement.parentId,
-        placementPosition: placement.position,
-        depth: placement.depth,
-        sponsorMid: d.sponsor,
-        hqPermanentLocked: false,
-        trialExpiresAt: trialExp,
-        totalEarnings: seq === 1 ? 12 : 4,
-        softwareKey: 'EVENT',
-        softwareTitle: '活動行銷 (1+1雙軌)',
-      });
-      if (parentBi) {
-        if (placement.position === 'L') parentBi.leftChildId = d.bi;
-        else parentBi.rightChildId = d.bi;
-      }
-
-      this.members.set(d.mid, {
-        mid: d.mid,
-        name: d.name,
-        phone: d.phone,
-        tel: d.tel,
-        line: d.line,
-        email: d.email,
-        address: d.address,
-        idNumberMasked: `A123***00${seq}`,
-        sponsorMid: d.sponsor,
-        storeId: d.store,
-        centerId: d.center,
-        registeredAt: new Date(now.getTime() - (20 - seq * 3) * 86400000).toISOString(),
-        trialExpiresAt: trialExp,
-        accumulatedRentAmount: 0,
-        monolineNodeId: d.mono,
-        binaryNodeId: d.bi,
-        contactId: d.cm,
-      });
-    });
-
-    this.currentMonolineCounter = 4;
-    this.currentBinaryCounter = 25000518;
-  }
-
   private initSampleBookings() {
     this.bookingProfiles.clear();
     this.bookingAppointments.clear();
@@ -512,9 +707,9 @@ export class ERPEngine {
     const profiles: BookingProfile[] = [
       {
         licenseId: 'BK-00001',
-        ownerMid: 'A-00001',
-        ownerName: '王大明',
-        displayTitle: '王大明 AI 產銷合一導入諮詢預約網',
+        ownerMid: 'A-00064',
+        ownerName: '李永吉',
+        displayTitle: '永吉家族 AI 產銷合一導入諮詢預約網',
         bio: '專精單軌公排與雙軌二元樹 1+1 自動路由設計，提供一對一新會員開通教學與商業診斷。',
         status: 'TRIAL_ACTIVE',
         activatedAt: new Date(now.getTime() - 5 * 86400000).toISOString(),
@@ -548,10 +743,10 @@ export class ERPEngine {
       },
       {
         licenseId: 'BK-00002',
-        ownerMid: 'A-00002',
-        ownerName: '李美華',
-        displayTitle: '板橋營業店 李美華店長預約工作室',
-        bio: '提供新北板橋區會員產銷物流自取、AI 軟體操作輔導與團隊增員諮詢。',
+        ownerMid: 'A-00065',
+        ownerName: '李佳馨',
+        displayTitle: '永吉家族 李佳馨預約服務中心',
+        bio: '提供會員產銷物流自取、AI 軟體操作輔導與團隊增員諮詢。',
         status: 'ACTIVE_RENEWED',
         activatedAt: new Date(now.getTime() - 40 * 86400000).toISOString(),
         expiresAt: new Date(now.getTime() + 20 * 86400000).toISOString(),
@@ -576,8 +771,8 @@ export class ERPEngine {
       {
         licenseId: 'BK-00003',
         ownerMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
-        ownerName: '第 6 代旗艦領袖',
-        displayTitle: '旗艦領袖總部戰略預約中心',
+        ownerName: '公司自營 008 號 (對外直推首席)',
+        displayTitle: '總公司自營戰略預約中心 (A-00008)',
         bio: '全國經銷團隊領袖、區域營運總監與教育中心合作提案專屬預約時段。',
         status: 'ACTIVE_RENEWED',
         activatedAt: new Date(now.getTime() - 60 * 86400000).toISOString(),
@@ -610,7 +805,7 @@ export class ERPEngine {
     const sampleAppointments: BookingAppointment[] = [
       {
         appointmentId: 'APT-00001',
-        ownerMid: 'A-00001',
+        ownerMid: 'A-00064',
         licenseId: 'BK-00001',
         serviceId: 'SRV-101',
         serviceTitle: 'AI 軟體 1+1 新會員開通一對一導覽',
@@ -625,7 +820,7 @@ export class ERPEngine {
       },
       {
         appointmentId: 'APT-00002',
-        ownerMid: 'A-00001',
+        ownerMid: 'A-00064',
         licenseId: 'BK-00001',
         serviceId: 'SRV-102',
         serviceTitle: '實體門店與教育中心聯盟簡報',
@@ -640,7 +835,7 @@ export class ERPEngine {
       },
       {
         appointmentId: 'APT-00003',
-        ownerMid: 'A-00002',
+        ownerMid: 'A-00065',
         licenseId: 'BK-00002',
         serviceId: 'SRV-201',
         serviceTitle: '新人 100 元閉環分潤財務說明',
@@ -906,7 +1101,7 @@ export class ERPEngine {
         budget: 35000,
         leader: '總部活動企劃團隊',
         notes: '現場安排 AI 軟體 1+1 雙發開通教學、100% 閉環撥發平帳公式解析與精緻茶點。',
-        photoUrl: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800&auto=format&fit=crop&q=80',
+        photoUrl: DEFAULT_SHEET_PHOTO_URL,
         updatedAt: new Date(now.getTime() - 5 * 86400000).toISOString(),
         participantsCount: 0,
       },
@@ -919,7 +1114,7 @@ export class ERPEngine {
         budget: 60000,
         leader: '總部教育培訓中心',
         notes: '全國 6 代輔導經營店店長與 6 代教育訓練總監聯席會議，研擬連鎖擴店戰略。',
-        photoUrl: 'https://images.unsplash.com/photo-1511578314322-379afb476865?w=800&auto=format&fit=crop&q=80',
+        photoUrl: DEFAULT_SHEET_PHOTO_URL,
         updatedAt: new Date(now.getTime() - 2 * 86400000).toISOString(),
         participantsCount: 0,
       },
@@ -939,7 +1134,7 @@ export class ERPEngine {
         photoTitle: '百位新會員現場實機開通 AI 軟體 1+1 雙通道',
         shootLocation: '台北國際教育培訓中心 演講大廳',
         contentNotes: '學員現場體驗單軌公排與雙軌二元樹卡位，氣氛熱烈，全員達成當日開通體驗指標！',
-        photoUrl: 'https://images.unsplash.com/photo-1528605248644-14dd04022da1?w=800&auto=format&fit=crop&q=80',
+        photoUrl: DEFAULT_SHEET_PHOTO_URL,
         updatedAt: new Date(now.getTime() - 4 * 86400000).toISOString(),
         eventId: 'EM-00001',
       },
@@ -950,7 +1145,7 @@ export class ERPEngine {
         photoTitle: '總公司與全國經營店長宣誓 100% 閉環零沉澱平帳',
         shootLocation: '台中市政教育中心 會議廳',
         contentNotes: '各區總監共同簽署加盟公約，齊心落實全齡人口 0~100 歲互助產銷生態。',
-        photoUrl: 'https://images.unsplash.com/photo-1517457373958-b7bdd4587205?w=800&auto=format&fit=crop&q=80',
+        photoUrl: DEFAULT_SHEET_PHOTO_URL,
         updatedAt: new Date(now.getTime() - 1 * 86400000).toISOString(),
         eventId: 'EM-00002',
       },
@@ -964,6 +1159,7 @@ export class ERPEngine {
   private saveState() {
     try {
       const payload = {
+        schemaVersion: CURRENT_SCHEMA_VERSION,
         members: Array.from(this.members.entries()),
         monolineNodes: Array.from(this.monolineNodes.entries()),
         binaryNodes: Array.from(this.binaryNodes.entries()),
@@ -1080,7 +1276,10 @@ export class ERPEngine {
     const now = new Date();
     const trialExpireDate = new Date(now.getTime() + GLOBAL_BOUNDARIES.TRIAL_DAYS * 24 * 3600 * 1000);
 
-    // 1. 分配會員代號 (A-碼) 與單軌節點編號 (C-碼) - 從 A-00001 建檔起編
+    // 1. 分配會員代號 (A-碼) 與單軌節點編號 (C-碼) - A-00001~A-00063 為公司自營不得轉讓，A-00064 起對外開放
+    if (this.currentMonolineCounter < GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ) {
+      this.currentMonolineCounter = GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+    }
     this.currentMonolineCounter += 1;
     const monolineMid = `A-${String(this.currentMonolineCounter).padStart(5, '0')}`;
     const monolineNodeId = `C-${String(this.currentMonolineCounter).padStart(5, '0')}`;
@@ -1088,7 +1287,7 @@ export class ERPEngine {
       ? 'HQ_ROOT'
       : `C-${String(this.currentMonolineCounter - 1).padStart(5, '0')}`;
 
-    // 推薦人預設為旗艦領袖 A-00001113
+    // 推薦人預設為 A-00008 (公司自營 #08 · 永吉家族直推起點)
     const sponsorMid = params.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
 
     // 2. 建立【第一組 AI 軟體節點 (單軌公排)】
@@ -1111,7 +1310,10 @@ export class ERPEngine {
     };
     this.monolineNodes.set(monolineNodeId, monolineNode);
 
-    // 3. 建立【第二組 AI 軟體節點 (雙軌卡位分身)】
+    // 3. 建立【第二組 AI 軟體節點 (雙軌卡位分身，C-25000001 起，C-25000064 起對外開放)】
+    if (this.currentBinaryCounter < 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ) {
+      this.currentBinaryCounter = 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+    }
     this.currentBinaryCounter += 1;
     const binaryNodeId = `C-${String(this.currentBinaryCounter).padStart(8, '0')}`;
 
@@ -1155,9 +1357,7 @@ export class ERPEngine {
     const userLine = (params.line || '').trim();
     const userEmail = (params.email || '').trim();
     const userAddress = (params.address || '').trim();
-    const userPhoto =
-      (params.photoUrl || '').trim() ||
-      `https://images.unsplash.com/photo-${1534528741775 + (this.currentContactCounter % 10)}?w=200&auto=format&fit=crop&q=80`;
+    const userPhoto = (params.photoUrl || '').trim() || DEFAULT_SHEET_PHOTO_URL;
 
     const cleanMid = monolineMid.replace(/[^A-Z0-9]/gi, '');
     const cloudFolderId = `GDRV-${cleanMid}`;
@@ -2425,7 +2625,7 @@ export class ERPEngine {
       line: record.line?.trim() || record.name.trim() + '_line',
       email: record.email?.trim() || `${id.toLowerCase()}@ai-saas.tw`,
       address: record.address?.trim() || '台灣生活圈',
-      photoUrl: record.photoUrl?.trim() || '',
+      photoUrl: record.photoUrl?.trim() || DEFAULT_SHEET_PHOTO_URL,
       updatedAt: new Date().toISOString(),
       memberMid: record.memberMid,
       ownerMid: record.ownerMid || record.memberMid,
@@ -2479,7 +2679,7 @@ export class ERPEngine {
       contactMethod: record.contactMethod || '線上開通',
       discussionContent: record.discussionContent.trim(),
       nextStepPlan: record.nextStepPlan.trim(),
-      photoUrl: record.photoUrl?.trim() || '',
+      photoUrl: record.photoUrl?.trim() || DEFAULT_SHEET_PHOTO_URL,
       updatedAt: new Date().toISOString(),
       contactId: record.contactId,
       memberMid: record.memberMid,
@@ -2532,7 +2732,7 @@ export class ERPEngine {
       budget: record.budget,
       leader: record.leader.trim(),
       notes: record.notes?.trim() || '',
-      photoUrl: record.photoUrl?.trim() || '',
+      photoUrl: record.photoUrl?.trim() || DEFAULT_SHEET_PHOTO_URL,
       updatedAt: new Date().toISOString(),
       participantsCount: 0,
     };
@@ -2575,7 +2775,7 @@ export class ERPEngine {
       photoTitle: record.photoTitle.trim(),
       shootLocation: record.shootLocation.trim(),
       contentNotes: record.contentNotes.trim(),
-      photoUrl: record.photoUrl.trim(),
+      photoUrl: record.photoUrl.trim() || DEFAULT_SHEET_PHOTO_URL,
       updatedAt: new Date().toISOString(),
       eventId: record.eventId,
     };
@@ -3084,8 +3284,14 @@ export class ERPEngine {
     this.settlements = Array.isArray(snapshot.settlements) ? [...snapshot.settlements] : [];
 
     if (snapshot.counters) {
-      this.currentMonolineCounter = Number(snapshot.counters.currentMonolineCounter ?? this.members.size);
-      this.currentBinaryCounter = Number(snapshot.counters.currentBinaryCounter ?? 25000514);
+      this.currentMonolineCounter = Math.max(
+        GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ,
+        Number(snapshot.counters.currentMonolineCounter ?? this.members.size)
+      );
+      this.currentBinaryCounter = Math.max(
+        25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ,
+        Number(snapshot.counters.currentBinaryCounter ?? 25000063)
+      );
       this.currentContactCounter = Number(snapshot.counters.currentContactCounter ?? this.contacts.size);
       this.currentTrackingCounter = Number(snapshot.counters.currentTrackingCounter ?? this.contactTrackings.size);
       this.currentEventCounter = Number(snapshot.counters.currentEventCounter ?? this.events.size);
@@ -3444,57 +3650,38 @@ export class ERPEngine {
     let importedContacts = 0;
     let importedTrackings = 0;
 
-    // 以試算表為唯一權威來源：先清掉所有非旗艦錨點之虛擬／舊資料，再完整重建
-    const flagshipMid = GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID;
-    const sheetUsesDirectBinarySlots =
-      Array.isArray(payload.binaryNodes) &&
-      payload.binaryNodes.some((row) => {
-        const nid = String(row?.nodeId || '').trim().toUpperCase();
-        const rowMid = String(row?.mid || '').trim().toUpperCase();
-        const bNum = parseInt(nid.replace(/^C-/, ''), 10);
-        return !isNaN(bNum) && bNum >= 25000002 && bNum <= 25000514 && Boolean(rowMid) && rowMid !== flagshipMid;
-      });
-
+    // 以試算表為來源同步真實對外會員（保留 A-00001~A-00063 公司自營不得轉讓 63 席與永吉家族起始資料）
     if (Array.isArray(payload.members)) {
       for (const mid of Array.from(this.members.keys())) {
-        if (mid !== flagshipMid) {
+        if (!isHqNonTransferableMid(mid)) {
           this.members.delete(mid);
         }
       }
-      this.monolineNodes.clear();
-      if (sheetUsesDirectBinarySlots) {
-        // 試算表雙軌節點直接從 C-25000002 起算（無 513 席 HQ 佔位池）：清掉非根節點避免幽靈池節點掛在真實會員下方
-        for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
-          if (node.type !== 'BINARY_ROOT') {
-            this.binaryNodes.delete(nid);
-          } else {
-            node.leftChildId = undefined;
-            node.rightChildId = undefined;
-          }
+      for (const [nid] of Array.from(this.monolineNodes.entries())) {
+        if (!isHqNonTransferableNodeId(nid)) {
+          this.monolineNodes.delete(nid);
         }
-        this.currentBinaryCounter = 25000001;
-      } else {
-        for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
-          if (node.type !== 'BINARY_ROOT' && node.type !== 'BINARY_HQ_POOL') {
-            const parent = this.binaryNodes.get(node.parentId);
-            if (parent) {
-              if (parent.leftChildId === nid) parent.leftChildId = undefined;
-              if (parent.rightChildId === nid) parent.rightChildId = undefined;
-            }
-            this.binaryNodes.delete(nid);
+      }
+      for (const [nid, node] of Array.from(this.binaryNodes.entries())) {
+        if (!isHqNonTransferableNodeId(nid)) {
+          const parent = this.binaryNodes.get(node.parentId);
+          if (parent) {
+            if (parent.leftChildId === nid) parent.leftChildId = undefined;
+            if (parent.rightChildId === nid) parent.rightChildId = undefined;
           }
+          this.binaryNodes.delete(nid);
         }
-        this.currentBinaryCounter = 25000514;
       }
       this.contacts.clear();
       this.contactTrackings.clear();
-      this.currentMonolineCounter = 0;
+      this.currentMonolineCounter = GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
+      this.currentBinaryCounter = 25000000 + GLOBAL_BOUNDARIES.HQ_LOCKED_MAX_SEQ;
       this.currentContactCounter = 0;
       this.currentTrackingCounter = 0;
 
       for (const row of payload.members) {
         const mid = String(row?.mid || '').trim().toUpperCase();
-        if (!mid) continue;
+        if (!mid || mid === 'A-00001113') continue;
         const existing = this.members.get(mid);
         const name = String(row?.name || existing?.name || mid).trim();
         const monolineNodeId = String(row?.monolineNodeId || existing?.monolineNodeId || '').trim().toUpperCase();
@@ -3509,8 +3696,7 @@ export class ERPEngine {
           email: String(row?.email ?? existing?.email ?? '').trim(),
           address: String(row?.address ?? existing?.address ?? '').trim(),
           photoUrl:
-            String(row?.photoUrl || existing?.photoUrl || '').trim() ||
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            String(row?.photoUrl || existing?.photoUrl || '').trim() || DEFAULT_SHEET_PHOTO_URL,
           idNumberMasked: String(row?.idNumberMasked ?? existing?.idNumberMasked ?? '').trim(),
           sponsorMid:
             String(row?.sponsorMid || existing?.sponsorMid || GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
@@ -3706,7 +3892,7 @@ export class ERPEngine {
         const nodeType: NodeRecord['type'] =
           nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID
             ? 'BINARY_ROOT'
-            : mid === flagshipMid && (binStatus === 'HQ_LOCKED' || binHqLocked)
+            : (isHqNonTransferableMid(mid) || isHqNonTransferableNodeId(nodeId)) && (binStatus === 'HQ_LOCKED' || binHqLocked)
               ? 'BINARY_HQ_POOL'
               : 'BINARY_MEMBER_SLOT';
 
@@ -3775,8 +3961,7 @@ export class ERPEngine {
           email: String(row?.email ?? existing?.email ?? '').trim(),
           address: String(row?.address ?? existing?.address ?? '').trim(),
           photoUrl:
-            String(row?.photoUrl || existing?.photoUrl || '').trim() ||
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            String(row?.photoUrl || existing?.photoUrl || '').trim() || DEFAULT_SHEET_PHOTO_URL,
           updatedAt: parseIso(row?.updatedAt),
           memberMid: String(row?.memberMid || '').trim().toUpperCase() || existing?.memberMid,
           ownerMid: String(row?.ownerMid || '').trim().toUpperCase() || existing?.ownerMid,
@@ -3820,8 +4005,7 @@ export class ERPEngine {
           discussionContent: String(row?.discussionContent || existing?.discussionContent || '').trim(),
           nextStepPlan: String(row?.nextStepPlan || existing?.nextStepPlan || '').trim(),
           photoUrl:
-            String(row?.photoUrl || existing?.photoUrl || '').trim() ||
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            String(row?.photoUrl || existing?.photoUrl || '').trim() || DEFAULT_SHEET_PHOTO_URL,
           updatedAt: parseIso(row?.updatedAt),
           contactId: existing?.contactId,
           memberMid: String(row?.memberMid || '').trim().toUpperCase() || existing?.memberMid,
@@ -3851,7 +4035,7 @@ export class ERPEngine {
           budget: row?.budget !== undefined && row?.budget !== '' ? row.budget : (existing?.budget ?? 0),
           leader: String(row?.leader || existing?.leader || '').trim(),
           notes: String(row?.notes ?? existing?.notes ?? '').trim(),
-          photoUrl: String(row?.photoUrl || existing?.photoUrl || '').trim(),
+          photoUrl: String(row?.photoUrl || existing?.photoUrl || '').trim() || DEFAULT_SHEET_PHOTO_URL,
           updatedAt: parseIso(row?.updatedAt),
           participantsCount: existing?.participantsCount ?? 0,
         };
@@ -3875,7 +4059,7 @@ export class ERPEngine {
           photoTitle: String(row?.photoTitle || existing?.photoTitle || etid).trim(),
           shootLocation: String(row?.shootLocation || existing?.shootLocation || '').trim(),
           contentNotes: String(row?.contentNotes || existing?.contentNotes || '').trim(),
-          photoUrl: String(row?.photoUrl || existing?.photoUrl || '').trim(),
+          photoUrl: String(row?.photoUrl || existing?.photoUrl || '').trim() || DEFAULT_SHEET_PHOTO_URL,
           updatedAt: parseIso(row?.updatedAt),
           eventId: existing?.eventId,
         };
@@ -3940,6 +4124,7 @@ export class ERPEngine {
       }
     }
 
+    this.ensureHq63AndYongjiSeed(false);
     this.saveState();
     return {
       importedMembers,
@@ -4140,8 +4325,8 @@ export class ERPEngine {
     operator: { userId: string; displayName: string }
   ) {
     const mid = String(rawMid || '').trim().toUpperCase();
-    if (mid === GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID) {
-      throw new Error(`系統核心錨點 ${mid} 受到保護，禁止刪除`);
+    if (isHqNonTransferableMid(mid)) {
+      throw new Error(`公司自營系統席位 ${mid} (A-00001~A-00063) 永久鎖定且不得轉讓，禁止刪除`);
     }
     const existing = this.members.get(mid);
     if (!existing) {
@@ -4259,8 +4444,8 @@ export class ERPEngine {
       if (!VALID_STATUSES.has(status)) {
         throw new Error(`無效的節點狀態：${status}`);
       }
-      if (nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID && status !== 'HQ_LOCKED') {
-        throw new Error('雙軌定海神針 C-25000001 必須維持 HQ_LOCKED 永久鎖定狀態');
+      if (isHqNonTransferableNodeId(nodeId) && status !== 'HQ_LOCKED') {
+        throw new Error(`公司自營系統節點 ${nodeId} (A-00001~A-00063) 不得轉讓，必須維持 HQ_LOCKED 永久鎖定狀態`);
       }
       if (status !== existing.status) {
         changes.push(`狀態: ${existing.status} → ${status}`);
@@ -4336,10 +4521,10 @@ export class ERPEngine {
     operator: { userId: string; displayName: string }
   ) {
     const nodeId = String(rawNodeId || '').trim().toUpperCase();
+    if (isHqNonTransferableNodeId(nodeId)) {
+      throw new Error(`公司自營系統節點 ${nodeId} (A-00001~A-00063) 永久鎖定且不得轉讓，禁止刪除`);
+    }
     if (track === 'BINARY') {
-      if (nodeId === GLOBAL_BOUNDARIES.BINARY_ROOT_NODE_ID) {
-        throw new Error('雙軌定海神針 C-25000001 受到保護，禁止刪除');
-      }
       const existing = this.binaryNodes.get(nodeId);
       if (!existing) throw new Error(`找不到雙軌節點 ${nodeId}`);
       if (existing.leftChildId || existing.rightChildId) {

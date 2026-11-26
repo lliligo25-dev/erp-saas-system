@@ -289,7 +289,7 @@ export const SettlementCalculator: React.FC<SettlementCalculatorProps> = ({
                       value={selectedNodeId}
                       onChange={(e) => setSelectedNodeId(e.target.value)}
                       className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-indigo-300 focus:outline-none focus:border-indigo-500"
-                      placeholder="例：C-25000001, C-25000515"
+                      placeholder="例：C-25000001, C-25000064"
                       required
                     />
                     <select

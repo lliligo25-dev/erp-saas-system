@@ -251,21 +251,24 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
     }
   }, [currentMember, allMembers, currentMid]);
 
-  // Preset fast-login candidates (動態從真實會員名冊讀取，不再顯示虛擬假名單)
+  // Preset fast-login candidates (優先列出 A-00064 起對外建檔會員如永吉家族，以及總部對外直推窗口 A-00008)
   const quickSwitchCandidates = React.useMemo(() => {
     const list: Array<{ mid: string; title: string; badge: string }> = [
-      { mid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID, title: '旗艦領袖 (錨點)', badge: '親推513席' },
+      { mid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID, title: '總部自營 008 (對外直推)', badge: '直推A-00064+' },
     ];
-    allMembers
-      .filter((m) => m.mid !== GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID)
-      .slice(0, 6)
-      .forEach((m) => {
-        list.push({
-          mid: m.mid,
-          title: `${m.name} (${m.mid})`,
-          badge: m.monolineNodeId || '真實會員',
-        });
+    const publicMembers = allMembers.filter((m) => {
+      const match = m.mid.match(/^A-(\d+)$/i);
+      const seq = match ? parseInt(match[1], 10) : 0;
+      return seq >= GLOBAL_BOUNDARIES.PUBLIC_OPEN_START_SEQ;
+    });
+    const source = publicMembers.length > 0 ? publicMembers : allMembers.filter((m) => m.mid !== GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID);
+    source.slice(0, 6).forEach((m) => {
+      list.push({
+        mid: m.mid,
+        title: `${m.name} (${m.mid})`,
+        badge: m.monolineNodeId || '對外會員',
       });
+    });
     return list;
   }, [allMembers]);
 
@@ -1315,16 +1318,16 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
               </div>
             </div>
 
-            {/* Worksheet Tabs Read/Write Permission Status Table */}
-            <div className="overflow-x-auto border border-slate-800 rounded-xl">
-              <table className="w-full text-xs text-left">
+            {/* Worksheet Tabs Read/Write Permission Status Table (Mobile 2D Scrollable) */}
+            <div className="overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] border border-slate-800 rounded-xl">
+              <table className="w-full min-w-[600px] text-xs text-left">
                 <thead className="bg-slate-950 text-slate-400 text-[11px] border-b border-slate-800">
                   <tr>
-                    <th className="py-2 px-3">試算表工作表分頁 (點擊查看內容)</th>
-                    <th className="py-2 px-3">既有舊資料</th>
-                    <th className="py-2 px-3">寫入權限管控 (GAS Protect)</th>
-                    <th className="py-2 px-3">到期日</th>
-                    <th className="py-2 px-3 text-right">檢視 / 續約</th>
+                    <th className="py-2 px-3 whitespace-nowrap">試算表工作表分頁 (點擊查看內容)</th>
+                    <th className="py-2 px-3 whitespace-nowrap">既有舊資料</th>
+                    <th className="py-2 px-3 whitespace-nowrap">寫入權限管控 (GAS Protect)</th>
+                    <th className="py-2 px-3 whitespace-nowrap">到期日</th>
+                    <th className="py-2 px-3 text-right whitespace-nowrap">檢視 / 續約</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">

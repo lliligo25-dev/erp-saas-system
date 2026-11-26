@@ -102,7 +102,7 @@ export const GasCodeAndApiView: React.FC = () => {
 
   // GAS MySQL Sync Cache & Temporary Indexer State
   const [cacheSnapshot, setCacheSnapshot] = useState<GasCacheSnapshot>(() => getGasCacheSnapshot());
-  const [cacheQueryKeyword, setCacheQueryKeyword] = useState<string>('A-00001113');
+  const [cacheQueryKeyword, setCacheQueryKeyword] = useState<string>('A-00008');
   const [cacheQueryResult, setCacheQueryResult] = useState<CacheQueryResult | null>(null);
   const [cacheBusy, setCacheBusy] = useState<boolean>(false);
 
@@ -126,7 +126,7 @@ export const GasCodeAndApiView: React.FC = () => {
           name: '林志豪',
           phone: '0988-123-456',
           idNumberMasked: 'B120***345',
-          sponsorMid: 'A-00001113',
+          sponsorMid: 'A-00008',
           storeId: 'S-TAIPEI-01',
           centerId: 'EDU-GLOBAL-01',
         },
@@ -404,7 +404,7 @@ export const GasCodeAndApiView: React.FC = () => {
                 name: '林志豪',
                 phone: '0988-123-456',
                 idNumberMasked: 'B120***345',
-                sponsorMid: 'A-00001113',
+                sponsorMid: 'A-00008',
                 storeId: 'S-TAIPEI-01',
                 centerId: 'EDU-GLOBAL-01',
               },
@@ -435,7 +435,7 @@ export const GasCodeAndApiView: React.FC = () => {
             {
               action: 'queryMember',
               data: {
-                keyword: 'A-00001113',
+                keyword: 'A-00008',
               },
             },
             null,
@@ -506,7 +506,7 @@ export const GasCodeAndApiView: React.FC = () => {
           JSON.stringify(
             {
               action: 'getTodos',
-              memberMid: 'A-00001113',
+              memberMid: 'A-00008',
             },
             null,
             2
@@ -518,7 +518,7 @@ export const GasCodeAndApiView: React.FC = () => {
           JSON.stringify(
             {
               action: 'upsertTodo',
-              memberMid: 'A-00001113',
+              memberMid: 'A-00008',
               data: {
                 ID: 'TDT-901',
                 狀態: '處理中',
@@ -609,7 +609,7 @@ export const GasCodeAndApiView: React.FC = () => {
           JSON.stringify(
             {
               action: 'provisionMemberCloudWorkspace',
-              memberMid: 'A-00001113',
+              memberMid: 'A-00008',
               memberName: '總公司直營旗艦示範戶',
             },
             null,
@@ -622,7 +622,7 @@ export const GasCodeAndApiView: React.FC = () => {
           JSON.stringify(
             {
               action: 'getMemberCloudWorkspace',
-              memberMid: 'A-00001113',
+              memberMid: 'A-00008',
             },
             null,
             2
@@ -670,8 +670,8 @@ export const GasCodeAndApiView: React.FC = () => {
           JSON.stringify(
             {
               action: 'invalidateHotCache',
-              keys: ['SYS_STATS', 'Q_MEM:A-00001113'],
-              memberMid: 'A-00001113',
+              keys: ['SYS_STATS', 'Q_MEM:A-00008'],
+              memberMid: 'A-00008',
             },
             null,
             2
@@ -771,7 +771,7 @@ export const GasCodeAndApiView: React.FC = () => {
             message: `100 點全額閉環清算完成！驗證總和：${s.totalDistributed} 點 (完美平帳，0 資金沉澱)。`,
           };
         } else if (parsed.action === 'queryMember') {
-          const cacheRes = queryWithMysqlSyncCache(String(parsed.data?.keyword || 'A-00001113'));
+          const cacheRes = queryWithMysqlSyncCache(String(parsed.data?.keyword || 'A-00008'));
           const found = erpEngine.findMemberByMidOrNode(parsed.data.keyword);
           resp = {
             success: true,
@@ -800,11 +800,11 @@ export const GasCodeAndApiView: React.FC = () => {
           const allC = erpEngine.getAllContacts();
           resp = { success: true, count: allC.length, data: allC };
         } else if (parsed.action === 'getTodos') {
-          const mid = parsed.memberMid || 'A-00001113';
+          const mid = parsed.memberMid || 'A-00008';
           const todos = getMemberTodos(mid);
           resp = { success: true, memberMid: mid, count: todos.length, todos };
         } else if (parsed.action === 'upsertTodo') {
-          const mid = parsed.memberMid || 'A-00001113';
+          const mid = parsed.memberMid || 'A-00008';
           resp = {
             success: true,
             action: 'upsertTodo',
@@ -860,7 +860,7 @@ export const GasCodeAndApiView: React.FC = () => {
             message: `批次 ${(parsed.batchIndex || 0) + 1}/${parsed.totalBatches || 1} (${parsed.entityType || 'members'}) 已完成 JDBC Batch 寫入 ${rowsCount} 筆`,
           };
         } else if (parsed.action === 'provisionMemberCloudWorkspace') {
-          const mid = parsed.memberMid || 'A-00001113';
+          const mid = parsed.memberMid || 'A-00008';
           const ws = ensureMemberCloudWorkspace(mid);
           resp = {
             success: true,
@@ -877,7 +877,7 @@ export const GasCodeAndApiView: React.FC = () => {
             message: `已為會員 ${ws.memberMid} 建立獨立 Google 雲端資料夾與試算表（含未續約工作表 protect() 唯讀保護檢查）`,
           };
         } else if (parsed.action === 'getMemberCloudWorkspace') {
-          const mid = parsed.memberMid || 'A-00001113';
+          const mid = parsed.memberMid || 'A-00008';
           const ws = ensureMemberCloudWorkspace(mid);
           const contactPerm = getModuleWritePermission(mid, 'CONTACT');
           resp = {
@@ -913,7 +913,7 @@ export const GasCodeAndApiView: React.FC = () => {
             config: snap.config,
           };
         } else if (parsed.action === 'invalidateHotCache') {
-          invalidateCacheForMemberOrNode(parsed.memberMid || 'A-00001113');
+          invalidateCacheForMemberOrNode(parsed.memberMid || 'A-00008');
           resp = {
             success: true,
             action: 'invalidateHotCache',
@@ -1800,7 +1800,7 @@ export const GasCodeAndApiView: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 text-[10px] font-mono">
-                  {['A-00001113', 'C-25000001', 'C-25000002', 'SYS_STATS'].map((presetKw) => (
+                  {['A-00008', 'C-25000001', 'C-25000002', 'SYS_STATS'].map((presetKw) => (
                     <button
                       key={presetKw}
                       type="button"
