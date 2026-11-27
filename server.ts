@@ -517,10 +517,12 @@ async function startServer() {
     });
   });
 
-  // 4a. HQ-Only Full Project Source ZIP Export (Excludes secrets, node_modules, dist, runtime state)
+  // 4a. HQ-Only Full Project Source ZIP Export (Includes latest ready-to-paste Code.gs; excludes secrets, node_modules, dist, runtime state)
   app.get('/api/hq/download-project-zip', requireHqRole, (_req, res) => {
     try {
-      const { buffer, fileCount } = buildProjectSourceZip(process.cwd());
+      const { buffer, fileCount } = buildProjectSourceZip(process.cwd(), [
+        { relPath: 'Code.gs', content: GOOGLE_APPS_SCRIPT_CODE },
+      ]);
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', 'attachment; filename="erp-saas-system.zip"');
       res.setHeader('X-Exported-File-Count', String(fileCount));
@@ -528,6 +530,19 @@ async function startServer() {
       res.send(buffer);
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err?.message || '產生專案壓縮檔失敗' });
+    }
+  });
+
+  // 4a-2. HQ-Only Direct Download of Latest Code.gs (.gs)
+  app.get('/api/hq/download-gas-code', requireHqRole, (_req, res) => {
+    try {
+      const buf = Buffer.from(GOOGLE_APPS_SCRIPT_CODE, 'utf8');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="Code.gs"');
+      res.setHeader('Content-Length', String(buf.length));
+      res.send(buf);
+    } catch (err: any) {
+      res.status(500).json({ ok: false, error: err?.message || '產生最新 Code.gs 失敗' });
     }
   });
 

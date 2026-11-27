@@ -293,12 +293,12 @@ function countModuleRecords(member: Member | undefined, sysType: string): number
   if (sysType === 'CONTACT_M') {
     return erpEngine
       .getAllContacts()
-      .filter((c) => c.ownerMid === member.mid || c.memberMid === member.mid).length;
+      .filter((c) => c.ownerMid === member.mid).length;
   }
   if (sysType === 'CONTACT_T') {
     return erpEngine
       .getAllContactTrackings()
-      .filter((t) => t.ownerMid === member.mid || t.memberMid === member.mid).length;
+      .filter((t) => t.ownerMid === member.mid).length;
   }
   if (sysType === 'EVENT_M') {
     return erpEngine.getAllEvents().length;
@@ -356,7 +356,7 @@ export function getMemberCloudSheetTabData(memberMid: string, sysType: string): 
     const columns = ['ID', '類別', '姓名', '手機', '電話', 'Line', 'Email', '地址', '照片連結', '最後更新'];
     const rows = erpEngine
       .getAllContacts()
-      .filter((c) => c.ownerMid === normalizedMid || c.memberMid === normalizedMid)
+      .filter((c) => c.ownerMid === normalizedMid)
       .map((c) => ({
         ID: c.id || '',
         類別: c.status || '親朋好友',
@@ -376,7 +376,7 @@ export function getMemberCloudSheetTabData(memberMid: string, sysType: string): 
     const columns = ['ID', '狀態', '聯絡對象', '日期', '方式', '內容摘要', '下一步計畫', '照片連結', '紀錄時間'];
     const rows = erpEngine
       .getAllContactTrackings()
-      .filter((t) => t.ownerMid === normalizedMid || t.memberMid === normalizedMid)
+      .filter((t) => t.ownerMid === normalizedMid)
       .map((t) => ({
         ID: t.id || '',
         狀態: t.status || '',

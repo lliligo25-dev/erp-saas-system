@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
   ChevronLeft,
@@ -51,6 +52,32 @@ function isSafeImagePreviewSrc(raw: string): boolean {
   }
 }
 
+function upgradeHdPhotoUrl(rawUrl: string, targetWidth = 1600): string {
+  const s = (rawUrl || '').trim();
+  if (!s || s.startsWith('data:')) return s;
+  try {
+    const parsed = new URL(s);
+    if (parsed.hostname.includes('drive.google.com')) {
+      if (parsed.pathname === '/thumbnail') {
+        const currentSz = parsed.searchParams.get('sz') || '';
+        const match = currentSz.match(/^w(\d+)$/i);
+        const curW = match ? parseInt(match[1], 10) : 0;
+        if (!curW || curW < targetWidth) {
+          parsed.searchParams.set('sz', `w${targetWidth}`);
+        }
+        return parsed.toString();
+      }
+      const fileMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/);
+      if (fileMatch?.[1]) {
+        return `https://drive.google.com/thumbnail?sz=w${targetWidth}&id=${fileMatch[1]}`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return s;
+}
+
 export const MemberCloudSheetViewer: React.FC<MemberCloudSheetViewerProps> = ({
   memberMid,
   cloudVault,
@@ -71,7 +98,10 @@ export const MemberCloudSheetViewer: React.FC<MemberCloudSheetViewerProps> = ({
 
   const [activeSysType, setActiveSysType] = useState<string>(defaultTab);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<{
+    src: string;
+    details: Array<{ label: string; value: string }>;
+  } | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
   const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
 
@@ -533,15 +563,21 @@ export const MemberCloudSheetViewer: React.FC<MemberCloudSheetViewerProps> = ({
                           {canRenderPhoto ? (
                             <button
                               type="button"
-                              onClick={() => setPreviewPhoto(val)}
+                              onClick={() => {
+                                const details = tabData.columns
+                                  .filter((c) => !(c.includes('照片') || c.toLowerCase().includes('photo')))
+                                  .map((c) => ({ label: c, value: row[c] || '—' }));
+                                setPreviewPhoto({ src: val, details });
+                              }}
                               className="inline-flex items-center gap-1.5 group cursor-pointer"
-                              title="點擊放大照片"
+                              title="點擊放大照片與檢視明細"
                             >
                               <img
-                                src={val}
+                                src={upgradeHdPhotoUrl(val, 600)}
                                 alt="附圖"
+                                decoding="async"
                                 referrerPolicy="no-referrer"
-                                className="w-9 h-9 rounded object-cover border border-slate-300 group-hover:scale-105 transition-transform shrink-0"
+                                className="w-9 h-9 rounded object-cover object-center border border-slate-300 group-hover:scale-105 transition-transform shrink-0"
                               />
                               <span className="text-[11px] text-indigo-500 underline inline-flex items-center gap-0.5 whitespace-nowrap">
                                 <ImageIcon className="w-3 h-3" />
@@ -564,32 +600,66 @@ export const MemberCloudSheetViewer: React.FC<MemberCloudSheetViewerProps> = ({
         )}
       </div>
 
-      {/* Photo Lightbox */}
-      {previewPhoto && (
-        <div
-          className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setPreviewPhoto(null)}
-        >
+      {/* Photo + Original Details Lightbox */}
+      {previewPhoto &&
+        typeof document !== 'undefined' &&
+        createPortal(
           <div
-            className="relative max-w-2xl max-h-[85vh] bg-slate-950 rounded-2xl p-2 border border-slate-700 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[140] bg-black/80 flex items-center justify-center p-3 sm:p-5"
+            onClick={() => setPreviewPhoto(null)}
           >
-            <button
-              type="button"
-              onClick={() => setPreviewPhoto(null)}
-              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white text-slate-900 flex items-center justify-center shadow-lg cursor-pointer"
+            <div
+              className="relative w-full max-w-2xl max-h-[88vh] bg-white text-slate-900 rounded-2xl overflow-hidden border border-slate-200 shadow-2xl flex flex-col"
+              onClick={(e) => e.stopPropagation()}
             >
-              <X className="w-4 h-4" />
-            </button>
-            <img
-              src={previewPhoto}
-              alt="試算表附圖預覽"
-              referrerPolicy="no-referrer"
-              className="max-w-full max-h-[78vh] rounded-xl object-contain"
-            />
-          </div>
-        </div>
-      )}
+              <button
+                type="button"
+                onClick={() => setPreviewPhoto(null)}
+                aria-label="關閉照片預覽"
+                className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center shadow-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <div className="flex-1 overflow-y-auto overscroll-contain">
+                <div className="bg-slate-950 flex items-center justify-center p-2">
+                  <img
+                    src={upgradeHdPhotoUrl(previewPhoto.src, 1920)}
+                    alt="試算表附圖預覽"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    className="max-w-full max-h-[48vh] rounded-xl object-contain object-center"
+                  />
+                </div>
+                {previewPhoto.details.length > 0 && (
+                  <div className="p-4 bg-white">
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-slate-50/80">
+                      {previewPhoto.details.map((d) => (
+                        <div key={d.label} className="px-3.5 py-2 flex flex-col gap-0.5">
+                          <span className="text-[11px] font-semibold text-slate-500">
+                            {d.label}
+                          </span>
+                          <span className="text-sm text-slate-900 break-words whitespace-pre-wrap">
+                            {d.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="px-4 py-2.5 border-t border-slate-200 bg-slate-50 flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setPreviewPhoto(null)}
+                  className="px-4 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer"
+                >
+                  關閉
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

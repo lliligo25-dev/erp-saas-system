@@ -418,7 +418,7 @@ export class ERPEngine {
       contactDate: now.toISOString().split('T')[0],
       contactMethod: '線上開通',
       discussionContent: params.discussionContent || `新會員開通 AI 軟體 1+1：通訊錄 CRM + 活動行銷（同步綁定單軌 ${monolineNodeId} 與雙軌 ${binaryNodeId}，贈送 30 天體驗）`,
-      nextStepPlan: params.nextStepPlan || '引導登入全能五星系統使用通訊錄 CRM 與活動行銷，並邀約參加說明會 (EM-00001)',
+      nextStepPlan: params.nextStepPlan || '引導登入全能五星系統使用通訊錄 CRM 與活動行銷',
       photoUrl: userPhoto,
       updatedAt: now.toISOString(),
       contactId,

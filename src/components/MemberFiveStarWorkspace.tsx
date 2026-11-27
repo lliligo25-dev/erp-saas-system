@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { erpEngine } from '../services/erpEngine';
 import { HorizontalScrollStrip } from './HorizontalScrollStrip';
 import {
@@ -51,7 +52,6 @@ import {
   isRealGoogleSheetId,
   isSafeGoogleCloudUrl,
   renewMemberModuleNow,
-  setModuleExpiryStateForTest,
   syncMemberCloudWorkspaceWithGas,
 } from '../services/memberCloudVaultService';
 import { MemberCloudSheetViewer } from './MemberCloudSheetViewer';
@@ -257,6 +257,32 @@ function getRecordDateValues(conf: SysModuleConfig | undefined, rec: DynamicReco
   return vals;
 }
 
+function upgradeHdPhotoUrl(rawUrl: string, targetWidth = 1400): string {
+  const s = (rawUrl || '').trim();
+  if (!s || s.startsWith('data:')) return s;
+  try {
+    const parsed = new URL(s);
+    if (parsed.hostname.includes('drive.google.com')) {
+      if (parsed.pathname === '/thumbnail') {
+        const currentSz = parsed.searchParams.get('sz') || '';
+        const match = currentSz.match(/^w(\d+)$/i);
+        const curW = match ? parseInt(match[1], 10) : 0;
+        if (!curW || curW < targetWidth) {
+          parsed.searchParams.set('sz', `w${targetWidth}`);
+        }
+        return parsed.toString();
+      }
+      const fileMatch = parsed.pathname.match(/\/file\/d\/([^/]+)/);
+      if (fileMatch?.[1]) {
+        return `https://drive.google.com/thumbnail?sz=w${targetWidth}&id=${fileMatch[1]}`;
+      }
+    }
+  } catch {
+    // keep raw url
+  }
+  return s;
+}
+
 function compressImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -270,18 +296,32 @@ function compressImageFile(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => resolve(dataUrl);
       img.onload = () => {
+        // 支援 GAS 雙欄 photoPart1+photoPart2 (共 90,000 字元)，優先使用 WebP 高畫質壓縮（解析度可達 1440px）
+        const MAX_DATA_URL_LEN = 88_000;
         const steps = [
-          { maxWidth: 720, quality: 0.68 },
-          { maxWidth: 560, quality: 0.58 },
-          { maxWidth: 440, quality: 0.48 },
+          { maxDim: 1440, quality: 0.88 },
+          { maxDim: 1200, quality: 0.84 },
+          { maxDim: 1024, quality: 0.80 },
+          { maxDim: 880, quality: 0.76 },
+          { maxDim: 720, quality: 0.72 },
         ];
+        const testCanvas = document.createElement('canvas');
+        testCanvas.width = 2;
+        testCanvas.height = 2;
+        const supportsWebp = testCanvas
+          .toDataURL('image/webp', 0.85)
+          .startsWith('data:image/webp');
+        const mimeType = supportsWebp ? 'image/webp' : 'image/jpeg';
+
         let best = '';
         for (const step of steps) {
-          let width = img.width;
-          let height = img.height;
-          if (width > step.maxWidth) {
-            height = Math.round((height * step.maxWidth) / width);
-            width = step.maxWidth;
+          let width = img.naturalWidth || img.width;
+          let height = img.naturalHeight || img.height;
+          const longest = Math.max(width, height);
+          if (longest > step.maxDim) {
+            const ratio = step.maxDim / longest;
+            width = Math.max(1, Math.round(width * ratio));
+            height = Math.max(1, Math.round(height * ratio));
           }
           const canvas = document.createElement('canvas');
           canvas.width = width;
@@ -291,9 +331,11 @@ function compressImageFile(file: File): Promise<string> {
             resolve(dataUrl);
             return;
           }
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, width, height);
-          best = canvas.toDataURL('image/jpeg', step.quality);
-          if (best.length <= 44_000) {
+          best = canvas.toDataURL(mimeType, step.quality);
+          if (best.length <= MAX_DATA_URL_LEN) {
             break;
           }
         }
@@ -657,7 +699,6 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   // Cloud Folder & Spreadsheet Vault Modal State
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [cloudSyncing, setCloudSyncing] = useState(false);
-  const [vaultTestModuleKey, setVaultTestModuleKey] = useState<string>('CONTACT');
 
   useEffect(() => {
     if (initialOrgNodeId) {
@@ -753,12 +794,10 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       });
     };
 
-    // 1. CONTACT_M & CONTACT_T (from erpEngine, strictly scoped to memberMid + direct referrals)
+    // 1. CONTACT_M & CONTACT_T (strictly owned by logged-in memberMid; zero upline/demo leaks)
     if (unlockedPacks.includes('CONTACT')) {
       erpEngine.getAllContacts().forEach((c: ContactMasterRecord) => {
-        const isOwned =
-          c.ownerMid === memberMid ||
-          (c.memberMid && directReferralMids.has(c.memberMid));
+        const isOwned = c.ownerMid === memberMid;
         if (!isOwned) return;
         pushConfigRecord(
           'CONTACT_M',
@@ -784,9 +823,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       });
 
       erpEngine.getAllContactTrackings().forEach((t: ContactTrackingRecord) => {
-        const isOwned =
-          t.ownerMid === memberMid ||
-          (t.memberMid && directReferralMids.has(t.memberMid));
+        const isOwned = t.ownerMid === memberMid;
         if (!isOwned) return;
         pushConfigRecord(
           'CONTACT_T',
@@ -978,6 +1015,35 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     () => getOverdueCount(memberMid),
     [memberMid, refreshTick]
   );
+
+  // 開機浮貼逾期提醒：登入/啟動時若有逾期個人待辦，浮貼顯示 10 秒後自動消失
+  const [overdueToastSecondsLeft, setOverdueToastSecondsLeft] = useState<number>(0);
+  const overdueToastShownMidRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (overdueTodoCount <= 0) {
+      setOverdueToastSecondsLeft(0);
+      return;
+    }
+    if (overdueToastShownMidRef.current === memberMid) return;
+    overdueToastShownMidRef.current = memberMid;
+    setOverdueToastSecondsLeft(10);
+  }, [memberMid, overdueTodoCount]);
+
+  const showOverdueStartupToast =
+    overdueToastSecondsLeft > 0 &&
+    overdueTodoCount > 0 &&
+    activeSys !== 'TODO_BOARD' &&
+    activeSys !== 'TODO_T' &&
+    activeSys !== 'TODO_M';
+
+  useEffect(() => {
+    if (!showOverdueStartupToast) return;
+    const timer = window.setInterval(() => {
+      setOverdueToastSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [showOverdueStartupToast]);
 
   // Items currently belonging to selected activeSys
   const sysScopedItems = useMemo(() => {
@@ -1779,25 +1845,31 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
     return { aspectRatio: aspectMode };
   };
 
-  const renderThumbnailGraphic = (item: UnifiedCardItem, compact = false) => {
+  const renderThumbnailGraphic = (
+    item: UnifiedCardItem,
+    compact = false,
+    mode: 'card' | 'preview' = 'card'
+  ) => {
     const gMeta = BASE_GRADIENTS[item.baseKey] || BASE_GRADIENTS.CONTACT;
     const hasValidImg = Boolean(item.photoUrl) && !brokenImages[item.id];
 
     if (hasValidImg) {
+      const hdSrc = upgradeHdPhotoUrl(item.photoUrl, mode === 'preview' ? 1920 : 1200);
       return (
-        <>
-          <div
-            className="absolute -inset-3 bg-cover bg-center blur-lg opacity-35 scale-110 pointer-events-none"
-            style={{ backgroundImage: `url(${item.photoUrl})` }}
-          />
+        <div className="w-full h-full relative bg-slate-900 flex items-center justify-center overflow-hidden">
           <img
-            src={item.photoUrl}
+            src={hdSrc}
             alt={item.title}
+            decoding="async"
             referrerPolicy="no-referrer"
             onError={() => setBrokenImages((prev) => ({ ...prev, [item.id]: true }))}
-            className="w-full h-full object-cover relative z-10 transition-transform duration-500 group-hover:scale-105"
+            className={
+              mode === 'preview'
+                ? 'w-full h-full object-cover object-center relative z-10'
+                : 'w-full h-full object-cover object-center relative z-10 transition-transform duration-500 group-hover:scale-105'
+            }
           />
-        </>
+        </div>
       );
     }
 
@@ -2654,7 +2726,12 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
                 {/* 圖片格式面板 */}
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                  <div className="text-xs font-bold text-slate-800">圖片格式</div>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="text-xs font-bold text-slate-800">圖片格式</div>
+                    <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
+                      HD 自動取正中
+                    </span>
+                  </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {[
                       { id: '16/9' as AspectMode, label: 'YouTube 16:9' },
@@ -2729,70 +2806,9 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
         {/* ================= MAIN CONTENT AREA ================= */}
         <main className="flex-1 min-w-0 flex flex-col bg-[#f8fafc]">
-          {/* Sticky Top Section: Expandable Preview Player + Dynamic Filter Chips */}
+          {/* Sticky Top Section: Dynamic Filter Chips */}
           {activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && (
             <div className="sticky top-[60px] z-20 bg-[#f8fafc]/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
-              {/* Inline Player Preview Wrapper */}
-              {playerItem && (
-                <div className="bg-white border-b border-slate-200">
-                  <div className="p-4 pb-0 relative max-w-4xl mx-auto">
-                    <div
-                      className="relative rounded-xl overflow-hidden shadow-md bg-slate-900 cursor-zoom-in"
-                      style={{ aspectRatio: '16 / 9' }}
-                      onClick={() => {
-                        if (playerItem.photoUrl && !brokenImages[playerItem.id]) {
-                          setLightboxZoomed(false);
-                          setLightboxSrc(playerItem.photoUrl);
-                        }
-                      }}
-                    >
-                      {renderThumbnailGraphic(playerItem)}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPlayerItem(null);
-                        }}
-                        title="收合預覽"
-                        className="absolute top-3 left-3 z-20 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center backdrop-blur-md cursor-pointer"
-                      >
-                        <ChevronDown className="w-5 h-5" />
-                      </button>
-                      {playerItem.photoUrl && !brokenImages[playerItem.id] && (
-                        <div className="absolute bottom-3 right-3 z-20 px-2.5 py-1 rounded-full bg-black/60 text-white text-xs flex items-center gap-1 backdrop-blur-md">
-                          <Maximize2 className="w-3.5 h-3.5" />
-                          <span>點擊全螢幕縮放</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="p-4 max-w-4xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-bold text-lg text-slate-900">{playerItem.title}</h3>
-                      <div className="text-xs text-slate-600 flex flex-wrap items-center gap-2 mt-1">
-                        <span className="font-mono font-bold text-[#065fd4]">{playerItem.id}</span>
-                        <span>·</span>
-                        <span>{playerItem.channel}</span>
-                        <span>·</span>
-                        <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-medium">
-                          {playerItem.status}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => openDrawerView(playerItem)}
-                        className="px-3.5 py-2 bg-[#065fd4] hover:bg-blue-700 text-white text-xs font-semibold rounded-xl cursor-pointer"
-                      >
-                        開啟詳細明細 / 編輯
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Filter Chips Row 1: Category / Module Chips (Horizontally Scrollable) */}
               <div className="px-3 sm:px-6 py-2.5 flex items-center justify-between gap-3 min-w-0">
                 <HorizontalScrollStrip
@@ -3301,26 +3317,6 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                 </div>
               )}
 
-              {overdueTodoCount > 0 && activeSys !== 'TODO_T' && activeSys !== 'TODO_M' && (
-                <div className="px-5 pt-4">
-                  <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="text-xs text-rose-900 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span>
-                        <span className="font-bold">個人待辦逾期提醒：</span>
-                        您目前有 <span className="font-bold">{overdueTodoCount} 項</span>個人待辦任務已超過截止時間，可於拖曳看板調整進度或延後時程（即時同步 GAS 後端）。
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleSwitchSys('TODO_BOARD')}
-                      className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shrink-0 cursor-pointer"
-                    >
-                      開啟個人待辦任務面板 →
-                    </button>
-                  </div>
-                </div>
-              )}
               {(activeSys === 'TODO_T' || activeSys === 'TODO_M') && (
                 <div className="px-5 pt-4">
                   <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3574,7 +3570,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                       }
                     }}
                   >
-                    {renderThumbnailGraphic(drawerItem)}
+                    {renderThumbnailGraphic(drawerItem, false, 'preview')}
                   </div>
 
                   {/* Master -> Transaction Quick Jump Button */}
@@ -3675,12 +3671,13 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
               {(drawerMode === 'edit' || drawerMode === 'create') && (
                 <div className="flex-1 flex flex-col space-y-3">
                   {formPhotoUrl && (
-                    <div className="rounded-xl overflow-hidden border-2 border-slate-200 shadow-sm">
+                    <div className="rounded-xl overflow-hidden border-2 border-slate-200 shadow-sm bg-slate-900">
                       <img
-                        src={formPhotoUrl}
+                        src={upgradeHdPhotoUrl(formPhotoUrl, 1200)}
                         alt="預覽圖片"
+                        decoding="async"
                         referrerPolicy="no-referrer"
-                        className="w-full object-cover"
+                        className="w-full object-cover object-center"
                         style={{ aspectRatio: '4 / 3' }}
                       />
                     </div>
@@ -4303,52 +4300,6 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
                     </div>
                   </div>
 
-                  {/* Expiry Simulation Controls */}
-                  <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-amber-950">測試未續約唯讀鎖定：</span>
-                      <select
-                        value={vaultTestModuleKey}
-                        onChange={(e) => setVaultTestModuleKey(e.target.value)}
-                        className="bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 cursor-pointer"
-                      >
-                        {ORDERABLE_SOFTWARE_CATALOG.map((c) => (
-                          <option key={c.key} value={c.key}>
-                            {c.title}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const perm = setModuleExpiryStateForTest(memberMid, vaultTestModuleKey, true);
-                          triggerRefresh();
-                          onNodesChanged?.();
-                          showToast(`已模擬「${perm.softwareTitle}」未續約到期：僅能查看舊資料，禁止新增！`);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Lock className="w-3 h-3" />
-                        <span>模擬到期(唯讀)</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const perm = setModuleExpiryStateForTest(memberMid, vaultTestModuleKey, false);
-                          triggerRefresh();
-                          onNodesChanged?.();
-                          showToast(`已恢復「${perm.softwareTitle}」有效授權，解除唯讀！`);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Unlock className="w-3 h-3" />
-                        <span>恢復讀寫</span>
-                      </button>
-                    </div>
-                  </div>
-
                   <div className="border border-slate-200 rounded-xl overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch]">
                     <table className="w-full min-w-[520px] text-xs text-left">
                       <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
@@ -4597,30 +4548,204 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         </div>
       )}
 
-      {/* ================= FULLSCREEN LIGHTBOX ================= */}
-      {lightboxSrc && (
-        <div
-          onClick={() => setLightboxSrc(null)}
-          className="fixed inset-0 z-50 bg-black/92 flex items-center justify-center p-4 overflow-hidden"
-        >
-          <button
-            type="button"
-            onClick={() => setLightboxSrc(null)}
-            className="absolute top-4 right-4 z-50 w-11 h-11 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center cursor-pointer"
+      {/* ================= FLOATING PHOTO PREVIEW + ORIGINAL DETAILS MODAL (ZERO SCROLL JUMP) ================= */}
+      {playerItem &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            onClick={() => setPlayerItem(null)}
+            className="fixed inset-0 z-[130] bg-black/75 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-6"
           >
-            <X className="w-6 h-6" />
-          </button>
-          <img
-            src={lightboxSrc}
-            alt="放大預覽"
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightboxZoomed((v) => !v);
-            }}
-            className={`max-w-full max-h-full object-contain transition-transform duration-300 ${
-              lightboxZoomed ? 'scale-150 cursor-zoom-out' : 'scale-100 cursor-zoom-in'
-            }`}
-          />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 max-h-[90vh] flex flex-col text-slate-900"
+            >
+              {/* Scrollable Photo + Original Details Content */}
+              <div className="flex-1 overflow-y-auto overscroll-contain">
+                <div
+                  className="relative bg-slate-900 cursor-zoom-in"
+                  style={{ aspectRatio: '16 / 9' }}
+                  onClick={() => {
+                    if (playerItem.photoUrl && !brokenImages[playerItem.id]) {
+                      setLightboxZoomed(false);
+                      setLightboxSrc(playerItem.photoUrl);
+                    }
+                  }}
+                >
+                  {renderThumbnailGraphic(playerItem, false, 'preview')}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPlayerItem(null);
+                    }}
+                    title="關閉預覽"
+                    aria-label="關閉預覽"
+                    className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center backdrop-blur-md cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  {playerItem.photoUrl && !brokenImages[playerItem.id] && (
+                    <div className="absolute bottom-3 right-3 z-20 px-2.5 py-1 rounded-full bg-black/65 text-white text-xs flex items-center gap-1 backdrop-blur-md">
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      <span>點擊全螢幕縮放</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Title, Badges & Full Original Detail Fields Underneath Photo */}
+                <div className="p-4 sm:p-5 space-y-4 bg-white">
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-base sm:text-lg text-slate-900 break-words">
+                      {playerItem.title}
+                    </h3>
+                    <div className="text-xs text-slate-600 flex flex-wrap items-center gap-2 mt-1">
+                      <span className="font-mono font-bold text-[#065fd4]">{playerItem.id}</span>
+                      <span>·</span>
+                      <span>{playerItem.channel}</span>
+                      <span>·</span>
+                      <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-medium">
+                        {playerItem.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Master -> Transaction Quick Jump Button */}
+                  {playerItem.isMaster && resolveSysConf(`${playerItem.baseKey}_T`) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = playerItem;
+                        setPlayerItem(null);
+                        handleJumpMasterToTrack(target);
+                      }}
+                      className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      <span>建立新紀錄 (自動跳轉帶入姓名與照片)</span>
+                    </button>
+                  )}
+
+                  {/* Full Original Detail Fields */}
+                  {playerItem.fieldsDisplay.length > 0 && (
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-slate-50/80">
+                      {playerItem.fieldsDisplay.map((f) => (
+                        <div key={f.label} className="px-3.5 py-2.5 flex flex-col gap-0.5">
+                          <span className="text-[11px] font-semibold text-slate-500">
+                            {f.label}
+                          </span>
+                          <span className="text-sm text-slate-900 break-words whitespace-pre-wrap">
+                            {f.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sticky Bottom Action Bar */}
+              <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = playerItem;
+                    setPlayerItem(null);
+                    openDrawerView(target);
+                  }}
+                  className="px-4 py-2 bg-[#065fd4] hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>編輯明細 / 操作</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlayerItem(null)}
+                  className="px-4 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs sm:text-sm font-semibold rounded-xl cursor-pointer"
+                >
+                  關閉
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* ================= FULLSCREEN LIGHTBOX ================= */}
+      {lightboxSrc &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            onClick={() => setLightboxSrc(null)}
+            className="fixed inset-0 z-[140] bg-black/92 flex items-center justify-center p-4 overflow-hidden"
+          >
+            <button
+              type="button"
+              onClick={() => setLightboxSrc(null)}
+              aria-label="關閉全螢幕預覽"
+              className="absolute top-4 right-4 z-50 w-11 h-11 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center cursor-pointer"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img
+              src={upgradeHdPhotoUrl(lightboxSrc, 2000)}
+              alt="放大預覽"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxZoomed((v) => !v);
+              }}
+              className={`max-w-full max-h-full object-contain transition-transform duration-300 ${
+                lightboxZoomed ? 'scale-150 cursor-zoom-out' : 'scale-100 cursor-zoom-in'
+              }`}
+            />
+          </div>,
+          document.body
+        )}
+      {/* ================= STARTUP FLOATING OVERDUE TODO TOAST (AUTO-DISMISS IN 10s) ================= */}
+      {showOverdueStartupToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-[120] w-[calc(100%-1.5rem)] max-w-xl pointer-events-auto"
+        >
+          <div className="bg-rose-50/95 backdrop-blur-md border border-rose-300 shadow-2xl rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5 text-xs text-rose-950 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-rose-900">個人待辦逾期提醒</span>
+                  <span className="text-[11px] font-mono font-bold text-rose-700 bg-rose-100 border border-rose-200 px-1.5 py-0.5 rounded-md">
+                    {overdueToastSecondsLeft} 秒後自動關閉
+                  </span>
+                </div>
+                <p className="leading-relaxed text-rose-900">
+                  您目前有 <span className="font-bold">{overdueTodoCount} 項</span>個人待辦任務已超過截止時間，可於拖曳看板調整進度或延後時程（即時同步 GAS 後端）。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setOverdueToastSecondsLeft(0);
+                  handleSwitchSys('TODO_BOARD');
+                }}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shrink-0 cursor-pointer shadow-xs transition-colors"
+              >
+                開啟個人待辦任務面板 →
+              </button>
+              <button
+                type="button"
+                aria-label="關閉提醒"
+                onClick={() => setOverdueToastSecondsLeft(0)}
+                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-100 cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

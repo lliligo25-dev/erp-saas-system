@@ -6,7 +6,7 @@
 export const GOOGLE_APPS_SCRIPT_CODE = `/**
  * ============================================================================
  * 產銷合一物流直銷單軌轉雙軌 SaaS ERP 系統 (Google Apps Script 後端 - Code.gs)
- * 版本：AI 專用修訂版 2.0 (Dual-Node Auto Allocation & 100% Closed Loop)
+ * 版本：AI 專用修訂版 3.0 (正式上線潔淨版 · HD 高畫質照片 · 10大模組表單同步)
  * ============================================================================
  * 
  * 核心規範依據：
@@ -47,7 +47,7 @@ var GLOBAL_CONFIG = {
   TIMEZONE: "Asia/Taipei",
   DATETIME_FORMAT: "yyyy-MM-dd HH:mm:ss",
   FRONTEND_APP_URL: "https://erp-saas-system.onrender.com",
-  DEFAULT_PHOTO_URL: "https://drive.google.com/thumbnail?sz=w800&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ"
+  DEFAULT_PHOTO_URL: "https://drive.google.com/thumbnail?sz=w1600&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ"
 };
 
 // ================= Google Sheets 模組配置 (通訊錄與活動) =================

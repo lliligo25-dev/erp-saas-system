@@ -54,7 +54,7 @@ export const GLOBAL_BOUNDARIES = {
   TRIAL_DAYS: 30,
 };
 
-const CURRENT_SCHEMA_VERSION = 'HQ63_YONGJI_V2';
+const CURRENT_SCHEMA_VERSION = 'HQ63_YONGJI_PROD_V3';
 const STORAGE_KEY = 'SAAS_ERP_STATE_V1';
 export const DEFAULT_SHEET_PHOTO_URL =
   'https://drive.google.com/thumbnail?sz=w800&id=1hhnvavFgkxXJuC6ECYWiPV9Ir1NWO4NJ';
@@ -576,7 +576,7 @@ export class ERPEngine {
   }
 
   /**
-   * 清除舊版快取殘留的 4 筆虛擬示範會員與對應假聯絡人／假預約資料
+   * 清除舊版測試殘留的模擬會員、假活動、假預約與模組虛擬示範資料（正式上線潔淨機制）
    */
   private purgeLegacyVirtualDemoData(): boolean {
     const legacyDemoSignatures = new Set([
@@ -585,11 +585,56 @@ export class ERPEngine {
       '張志豪|0933-555-777',
       '陳冠宇|0955-123-987',
     ]);
+    const legacyDemoEventThemes = new Set([
+      '【全台首發】新會員開通 AI 軟體 1+1 實體啟航說明會',
+      '產銷合一物流直銷單軌轉雙軌全省領袖戰略研討會',
+      '新會員開通 AI 軟體 1+1 實體啟航說明會',
+    ]);
+    const legacyDemoClients = new Set(['林詩涵', '吳建華', '黃小芬']);
+    const legacyDemoWorkspaceSigs = new Set([
+      'ATM-001|林佳穎',
+      'ATM-002|陳志強',
+      'ATT-001|林佳穎',
+      'ATT-002|陳志強',
+      'PRM-001|AI 產銷合一智聯健康飲禮盒',
+      'PRM-002|頂級冷壓初榨植萃油',
+      'PRT-001|黃冠傑',
+      'PRT-002|張雅婷',
+      'TCM-001|吳明宏',
+      'TCT-001|吳明宏',
+      'TCT-002|周美玲',
+      'NLM-001|劉欣怡',
+      'NLT-001|劉欣怡',
+      'ELM-001|林福氣伯伯',
+      'ELT-001|林福氣伯伯',
+      'FRM-001|玉井頂級愛文芒果禮盒',
+      'FRT-001|玉井頂級愛文芒果禮盒',
+      'GRM-001|有機履歷舒康雞胸肉',
+      'GRT-001|有機履歷舒康雞胸肉',
+      'ASM-001|仁愛康健整合診所',
+      'AST-001|仁愛康健整合診所',
+      'BKM-001|AI 軟體 1+1 一對一深度體驗導覽',
+      'BKM-002|產銷門市合作與系統導入諮詢',
+      'TDM-001|新會員 AI 1+1 開通輔導計畫',
+      'TDM-002|週期續約與產銷訂單月度檢視',
+      'TDT-001|聯繫今日預約體驗客戶確認上線時段',
+      'TDT-002|整理本週門店教育講座活動花絮發布',
+      'TDT-003|確認未續約體驗名單與關懷通知',
+    ]);
+
     let changed = false;
     const removedMids = new Set<string>();
 
     for (const [mid, m] of Array.from(this.members.entries())) {
-      if (legacyDemoSignatures.has(`${m.name}|${m.phone}`)) {
+      if (isHqNonTransferableMid(mid)) continue;
+      const isLegacyMockMember =
+        legacyDemoSignatures.has(`${m.name}|${m.phone}`) ||
+        Boolean(m.email && m.email.toLowerCase().endsWith('@example.com')) ||
+        Boolean(m.line && m.line.toLowerCase().startsWith('demo_')) ||
+        /^.+_\d{3}$/.test(String(m.name || '').trim()) ||
+        (String(m.name || '').includes('(第') &&
+          (String(m.name || '').includes('代模擬') || String(m.name || '').includes('代直推')));
+      if (isLegacyMockMember) {
         this.members.delete(mid);
         removedMids.add(mid);
         changed = true;
@@ -633,6 +678,54 @@ export class ERPEngine {
         }
       }
       this.recomputeCounters();
+    }
+
+    // 清除舊版虛擬預設活動與活動花絮
+    for (const [eid, ev] of Array.from(this.events.entries())) {
+      if (legacyDemoEventThemes.has(ev.eventTheme)) {
+        this.events.delete(eid);
+        changed = true;
+      }
+    }
+    for (const [etid, et] of Array.from(this.eventTrackings.entries())) {
+      if (legacyDemoEventThemes.has(et.eventTheme)) {
+        this.eventTrackings.delete(etid);
+        changed = true;
+      }
+    }
+
+    // 清除舊版虛擬測試預約明細
+    for (const [aid, ap] of Array.from(this.bookingAppointments.entries())) {
+      if (legacyDemoClients.has(ap.clientName)) {
+        this.bookingAppointments.delete(aid);
+        changed = true;
+      }
+    }
+
+    // 清除舊版工作區雲端殘留的模組虛擬範例資料
+    for (const [mid, sysMap] of Array.from(this.memberWorkspaceRecords.entries())) {
+      for (const [sysKey, recs] of Object.entries(sysMap)) {
+        if (!Array.isArray(recs)) continue;
+        const cleaned = recs.filter((rec) => {
+          const id = String(rec?.ID || '').trim();
+          const title = String(
+            rec?.['姓名'] ||
+              rec?.['客戶姓名'] ||
+              rec?.['品名'] ||
+              rec?.['診所與單位'] ||
+              rec?.['服務名稱'] ||
+              rec?.['專案名稱'] ||
+              rec?.['事項標題'] ||
+              ''
+          ).trim();
+          return !legacyDemoWorkspaceSigs.has(`${id}|${title}`);
+        });
+        if (cleaned.length !== recs.length) {
+          sysMap[sysKey] = cleaned;
+          changed = true;
+        }
+      }
+      this.memberWorkspaceRecords.set(mid, sysMap);
     }
 
     return changed;
@@ -698,161 +791,11 @@ export class ERPEngine {
   }
 
   private initSampleBookings() {
+    // 正式上線模式：不預載任何虛擬預約與假客戶資料
     this.bookingProfiles.clear();
     this.bookingAppointments.clear();
-    const now = new Date();
-    const tomorrow = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
-    const dayAfter = new Date(now.getTime() + 2 * 86400000).toISOString().split('T')[0];
-
-    const profiles: BookingProfile[] = [
-      {
-        licenseId: 'BK-00001',
-        ownerMid: 'A-00064',
-        ownerName: '李永吉',
-        displayTitle: '永吉家族 AI 產銷合一導入諮詢預約網',
-        bio: '專精單軌公排與雙軌二元樹 1+1 自動路由設計，提供一對一新會員開通教學與商業診斷。',
-        status: 'TRIAL_ACTIVE',
-        activatedAt: new Date(now.getTime() - 5 * 86400000).toISOString(),
-        expiresAt: new Date(now.getTime() + 25 * 86400000).toISOString(),
-        monthlyRentNtd: 100,
-        totalRenewalsCount: 0,
-        workingDays: [1, 2, 3, 4, 5, 6],
-        startHour: 9,
-        endHour: 20,
-        slotIntervalMinutes: 60,
-        services: [
-          {
-            id: 'SRV-101',
-            title: 'AI 軟體 1+1 新會員開通一對一導覽',
-            durationMinutes: 45,
-            priceNtd: 0,
-            description: '手把手協助開通 1+1 AI 軟體（通訊錄 CRM + 活動行銷）與第 3 種 AI 個人預約系統 30 天免費體驗。',
-            isActive: true,
-            locationType: 'ONLINE_MEET',
-          },
-          {
-            id: 'SRV-102',
-            title: '實體門店與教育中心聯盟簡報',
-            durationMinutes: 60,
-            priceNtd: 0,
-            description: '深度解析 6 代經營店輔導補貼與 6 代教育中心培訓補貼收益結構。',
-            isActive: true,
-            locationType: 'IN_PERSON',
-          },
-        ],
-      },
-      {
-        licenseId: 'BK-00002',
-        ownerMid: 'A-00065',
-        ownerName: '李佳馨',
-        displayTitle: '永吉家族 李佳馨預約服務中心',
-        bio: '提供會員產銷物流自取、AI 軟體操作輔導與團隊增員諮詢。',
-        status: 'ACTIVE_RENEWED',
-        activatedAt: new Date(now.getTime() - 40 * 86400000).toISOString(),
-        expiresAt: new Date(now.getTime() + 20 * 86400000).toISOString(),
-        monthlyRentNtd: 100,
-        totalRenewalsCount: 1,
-        workingDays: [1, 2, 3, 4, 5],
-        startHour: 10,
-        endHour: 18,
-        slotIntervalMinutes: 60,
-        services: [
-          {
-            id: 'SRV-201',
-            title: '新人 100 元閉環分潤財務說明',
-            durationMinutes: 60,
-            priceNtd: 0,
-            description: '詳細剖析 15+15+6+6+30+28=100 點零資金沉澱閉環機制。',
-            isActive: true,
-            locationType: 'IN_PERSON',
-          },
-        ],
-      },
-      {
-        licenseId: 'BK-00003',
-        ownerMid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID,
-        ownerName: '公司自營 008 號 (對外直推首席)',
-        displayTitle: '總公司自營戰略預約中心 (A-00008)',
-        bio: '全國經銷團隊領袖、區域營運總監與教育中心合作提案專屬預約時段。',
-        status: 'ACTIVE_RENEWED',
-        activatedAt: new Date(now.getTime() - 60 * 86400000).toISOString(),
-        expiresAt: new Date(now.getTime() + 300 * 86400000).toISOString(),
-        monthlyRentNtd: 100,
-        totalRenewalsCount: 2,
-        workingDays: [1, 2, 3, 4, 5],
-        startHour: 10,
-        endHour: 17,
-        slotIntervalMinutes: 60,
-        services: [
-          {
-            id: 'SRV-301',
-            title: '區域經營店／教育中心成立簽約面談',
-            durationMinutes: 60,
-            priceNtd: 0,
-            description: '審核加盟經營店與教育中心資格與區域佈局規劃。',
-            isActive: true,
-            locationType: 'ONLINE_MEET',
-          },
-        ],
-      },
-    ];
-
-    for (const p of profiles) {
-      this.bookingProfiles.set(p.ownerMid, p);
-    }
-    this.currentBookingLicenseCounter = profiles.length;
-
-    const sampleAppointments: BookingAppointment[] = [
-      {
-        appointmentId: 'APT-00001',
-        ownerMid: 'A-00064',
-        licenseId: 'BK-00001',
-        serviceId: 'SRV-101',
-        serviceTitle: 'AI 軟體 1+1 新會員開通一對一導覽',
-        date: tomorrow,
-        timeSlot: '14:00',
-        clientName: '林詩涵',
-        clientPhone: '0918-223-456',
-        clientLine: 'shihan_lin',
-        notes: '想了解 AI 軟體 30 天免費體驗與單軌雙軌如何運作',
-        status: 'CONFIRMED',
-        createdAt: new Date(now.getTime() - 2 * 3600000).toISOString(),
-      },
-      {
-        appointmentId: 'APT-00002',
-        ownerMid: 'A-00064',
-        licenseId: 'BK-00001',
-        serviceId: 'SRV-102',
-        serviceTitle: '實體門店與教育中心聯盟簡報',
-        date: dayAfter,
-        timeSlot: '16:00',
-        clientName: '吳建華',
-        clientPhone: '0939-778-901',
-        clientLine: 'jianhua_wu',
-        notes: '目前在桃園經營社區物流點，評估加入輔導店',
-        status: 'PENDING',
-        createdAt: new Date(now.getTime() - 3600000).toISOString(),
-      },
-      {
-        appointmentId: 'APT-00003',
-        ownerMid: 'A-00065',
-        licenseId: 'BK-00002',
-        serviceId: 'SRV-201',
-        serviceTitle: '新人 100 元閉環分潤財務說明',
-        date: tomorrow,
-        timeSlot: '11:00',
-        clientName: '黃小芬',
-        clientPhone: '0966-112-334',
-        clientLine: 'fen_huang',
-        status: 'PENDING',
-        createdAt: new Date(now.getTime() - 5 * 3600000).toISOString(),
-      },
-    ];
-
-    for (const apt of sampleAppointments) {
-      this.bookingAppointments.set(apt.appointmentId, apt);
-    }
-    this.currentAppointmentCounter = sampleAppointments.length;
+    this.currentBookingLicenseCounter = 0;
+    this.currentAppointmentCounter = 0;
   }
 
   private initSampleStores() {
@@ -1086,74 +1029,11 @@ export class ERPEngine {
   }
 
   private initDefaultPublicEvents() {
+    // 正式上線模式：活動主檔與活動花絮皆由真實使用者自行建檔，不預載任何虛擬示範活動
     this.events.clear();
     this.eventTrackings.clear();
-    const now = new Date();
-
-    // 活動主檔 (EVENT_M / EM-) 僅保留總部官方公告活動範本，不塞入虛擬會員
-    const sampleEvents: EventMasterRecord[] = [
-      {
-        id: 'EM-00001',
-        status: '報名中',
-        eventTheme: '【全台首發】新會員開通 AI 軟體 1+1 實體啟航說明會',
-        date: '2026-11-20',
-        location: '台北市大安區忠孝東路四段 128 號 12 樓 (台北教育中心)',
-        budget: 35000,
-        leader: '總部活動企劃團隊',
-        notes: '現場安排 AI 軟體 1+1 雙發開通教學、100% 閉環撥發平帳公式解析與精緻茶點。',
-        photoUrl: DEFAULT_SHEET_PHOTO_URL,
-        updatedAt: new Date(now.getTime() - 5 * 86400000).toISOString(),
-        participantsCount: 0,
-      },
-      {
-        id: 'EM-00002',
-        status: '籌備中',
-        eventTheme: '產銷合一物流直銷單軌轉雙軌全省領袖戰略研討會',
-        date: '2026-11-28',
-        location: '台中市西屯區市政北二路 240 號 15 樓 (台中教育中心)',
-        budget: 60000,
-        leader: '總部教育培訓中心',
-        notes: '全國 6 代輔導經營店店長與 6 代教育訓練總監聯席會議，研擬連鎖擴店戰略。',
-        photoUrl: DEFAULT_SHEET_PHOTO_URL,
-        updatedAt: new Date(now.getTime() - 2 * 86400000).toISOString(),
-        participantsCount: 0,
-      },
-    ];
-    for (const e of sampleEvents) {
-      this.events.set(e.id, e);
-    }
-    this.currentEventCounter = 2;
-
-    // 4. 活動花絮 (EVENT_T / ET-)
-    // headers: ["ID", "狀態", "活動主題", "照片標題", "拍攝地點", "內容備註", "照片連結", "更新時間"]
-    const sampleEventTrackings: EventTrackingRecord[] = [
-      {
-        id: 'ET-00001',
-        status: '公開發布',
-        eventTheme: '新會員開通 AI 軟體 1+1 實體啟航說明會',
-        photoTitle: '百位新會員現場實機開通 AI 軟體 1+1 雙通道',
-        shootLocation: '台北國際教育培訓中心 演講大廳',
-        contentNotes: '學員現場體驗單軌公排與雙軌二元樹卡位，氣氛熱烈，全員達成當日開通體驗指標！',
-        photoUrl: DEFAULT_SHEET_PHOTO_URL,
-        updatedAt: new Date(now.getTime() - 4 * 86400000).toISOString(),
-        eventId: 'EM-00001',
-      },
-      {
-        id: 'ET-00002',
-        status: '公開發布',
-        eventTheme: '產銷合一物流直銷單軌轉雙軌全省領袖戰略研討會',
-        photoTitle: '總公司與全國經營店長宣誓 100% 閉環零沉澱平帳',
-        shootLocation: '台中市政教育中心 會議廳',
-        contentNotes: '各區總監共同簽署加盟公約，齊心落實全齡人口 0~100 歲互助產銷生態。',
-        photoUrl: DEFAULT_SHEET_PHOTO_URL,
-        updatedAt: new Date(now.getTime() - 1 * 86400000).toISOString(),
-        eventId: 'EM-00002',
-      },
-    ];
-    for (const et of sampleEventTrackings) {
-      this.eventTrackings.set(et.id, et);
-    }
-    this.currentEventTrackingCounter = 2;
+    this.currentEventCounter = 0;
+    this.currentEventTrackingCounter = 0;
   }
 
   private saveState() {

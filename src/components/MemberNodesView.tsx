@@ -109,13 +109,6 @@ export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
     return () => window.removeEventListener(NODES_UPDATED_EVENT, handleNodesUpdated);
   }, [report?.member.mid, initialQuery]);
 
-  const handleSeedChain = (depth: number = 5) => {
-    if (!report) return;
-    erpEngine.seedMultiGenReferralChain(report.member.mid, depth);
-    const updated = erpEngine.getMemberFullNodeReport(report.member.mid);
-    setReport(updated);
-    setActiveTab('fifteen_gen');
-  };
 
   const handleSearch = (targetQuery?: string) => {
     const q = (targetQuery !== undefined ? targetQuery : query).trim();
@@ -904,27 +897,6 @@ export const MemberNodesView: React.FC<MemberNodesViewProps> = ({
                     查詢會員 <span className="font-mono text-indigo-300 font-bold">{report.member.mid}</span> 傘下向下延伸直推推薦 1~15 代之各代人數、會員名單及每月 15% (1.0 點/人) 閉環推薦分紅潛力。
                   </p>
                 </div>
-                
-                {/* Fast Simulator Action (Hidden in scopedMode) */}
-                {!scopedMode && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleSeedChain(5)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white font-sans text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 shadow-sm"
-                      title="為此會員自動依序建立 5 代直推下線測試鏈 (Gen 1 -> Gen 2 -> Gen 3 -> Gen 4 -> Gen 5)"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>一鍵模擬延伸 5 代直推鏈</span>
-                    </button>
-                    <button
-                      onClick={() => handleSeedChain(10)}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-200 font-sans text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 border border-slate-700"
-                      title="為此會員自動依序建立 10 代直推下線測試鏈"
-                    >
-                      <span>延伸 10 代</span>
-                    </button>
-                  </div>
-                )}
               </div>
 
               {/* 4 KPI Cards */}

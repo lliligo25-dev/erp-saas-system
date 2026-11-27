@@ -360,6 +360,42 @@ export async function apiDownloadHqProjectZip(): Promise<{
   }
 }
 
+export async function apiDownloadHqGasCode(): Promise<{
+  ok: boolean;
+  bytes?: number;
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/hq/download-gas-code', {
+      method: 'GET',
+      headers: buildAuthHeaders(),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      let msg = '僅限總部授權人員下載最新版 Code.gs';
+      try {
+        const data = await res.json();
+        if (data?.error) msg = data.error;
+      } catch {
+        // ignore json parse failure
+      }
+      return { ok: false, error: msg };
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Code.gs';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return { ok: true, bytes: blob.size };
+  } catch {
+    return { ok: false, error: '下載最新版 Code.gs 失敗，請稍後再試' };
+  }
+}
+
 export interface HqDbAuditEntry {
   id: string;
   timestamp: string;

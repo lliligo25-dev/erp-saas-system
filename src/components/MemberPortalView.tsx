@@ -56,7 +56,6 @@ import {
   Lock,
   Unlock,
   CreditCard,
-  ShieldAlert,
   Eye,
 } from 'lucide-react';
 import { PersonalTodoBoard } from './PersonalTodoBoard';
@@ -76,7 +75,6 @@ import {
 } from '../services/softwareNodeSync';
 import {
   getMemberModuleSubscriptions,
-  ORDERABLE_SOFTWARE_CATALOG,
   saveMemberModuleSubscriptions,
 } from '../services/memberFiveStarConfig';
 import {
@@ -89,7 +87,6 @@ import {
   MemberCloudWorkspace,
   notifyCloudVaultUpdated,
   renewMemberModuleNow,
-  setModuleExpiryStateForTest,
   syncMemberCloudWorkspaceWithGas,
 } from '../services/memberCloudVaultService';
 
@@ -164,7 +161,6 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
   const [cloudTick, setCloudTick] = useState(0);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const [copiedVaultField, setCopiedVaultField] = useState<string | null>(null);
-  const [testModuleKey, setTestModuleKey] = useState<string>('CONTACT');
   const [inlineNotice, setInlineNotice] = useState<{
     type: 'success' | 'warning' | 'info';
     text: string;
@@ -251,26 +247,6 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
     }
   }, [currentMember, allMembers, currentMid]);
 
-  // Preset fast-login candidates (優先列出 A-00064 起對外建檔會員如永吉家族，以及總部對外直推窗口 A-00008)
-  const quickSwitchCandidates = React.useMemo(() => {
-    const list: Array<{ mid: string; title: string; badge: string }> = [
-      { mid: GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID, title: '總部自營 008 (對外直推)', badge: '直推A-00064+' },
-    ];
-    const publicMembers = allMembers.filter((m) => {
-      const match = m.mid.match(/^A-(\d+)$/i);
-      const seq = match ? parseInt(match[1], 10) : 0;
-      return seq >= GLOBAL_BOUNDARIES.PUBLIC_OPEN_START_SEQ;
-    });
-    const source = publicMembers.length > 0 ? publicMembers : allMembers.filter((m) => m.mid !== GLOBAL_BOUNDARIES.FLAGSHIP_SPONSOR_MID);
-    source.slice(0, 6).forEach((m) => {
-      list.push({
-        mid: m.mid,
-        title: `${m.name} (${m.mid})`,
-        badge: m.monolineNodeId || '對外會員',
-      });
-    });
-    return list;
-  }, [allMembers]);
 
   // Save logged in MID to localStorage
   useEffect(() => {
@@ -471,6 +447,31 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
     [currentMid, todoRefreshTick, activeTab]
   );
 
+  // 開機浮貼逾期提醒：登入/啟動時若有逾期個人待辦，浮貼顯示 10 秒後自動消失
+  const [overdueToastSecondsLeft, setOverdueToastSecondsLeft] = useState<number>(0);
+  const overdueToastShownMidRef = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (overdueTodosCount <= 0) {
+      setOverdueToastSecondsLeft(0);
+      return;
+    }
+    if (overdueToastShownMidRef.current === currentMid) return;
+    overdueToastShownMidRef.current = currentMid;
+    setOverdueToastSecondsLeft(10);
+  }, [currentMid, overdueTodosCount]);
+
+  const showOverdueStartupToast =
+    overdueToastSecondsLeft > 0 && overdueTodosCount > 0 && activeTab !== 'todos';
+
+  useEffect(() => {
+    if (!showOverdueStartupToast) return;
+    const timer = window.setInterval(() => {
+      setOverdueToastSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [showOverdueStartupToast]);
+
   const cloudVault: MemberCloudWorkspace = React.useMemo(
     () => ensureMemberCloudWorkspace(currentMid),
     [currentMid, cloudTick, nodesRefreshTick, todoRefreshTick, isRenewModalOpen]
@@ -502,17 +503,6 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
     showNotice(res.success ? 'success' : 'warning', res.message);
   };
 
-  const handleToggleModuleExpiryTest = (expireNow: boolean) => {
-    const perm = setModuleExpiryStateForTest(currentMid, testModuleKey, expireNow);
-    setCloudTick((t) => t + 1);
-    setNodesRefreshTick((t) => t + 1);
-    showNotice(
-      expireNow ? 'warning' : 'success',
-      expireNow
-        ? `已模擬「${perm.softwareTitle}」未續約到期！現在該雲端試算表工作表與工作台僅能查看舊資料、禁止新增資料。`
-        : `已恢復「${perm.softwareTitle}」有效授權（+30 天），已解除唯讀鎖定！`
-    );
-  };
 
   const handleOneClickRenewModule = (moduleKey: string) => {
     const res = renewMemberModuleNow(currentMid, moduleKey);
@@ -575,36 +565,6 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
             )
           )}
         </div>
-
-        {/* Fast Switcher Chips (Hidden in scopedMode) */}
-        {!scopedMode && (
-          <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-indigo-400" />
-              快速切換示範會員：
-            </span>
-            {quickSwitchCandidates.map((cand) => {
-              const isSelected = currentMid === cand.mid;
-              return (
-                <button
-                  key={cand.mid}
-                  onClick={() => handleSwitchMember(cand.mid)}
-                  className={`px-2.5 py-1 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer font-sans ${
-                    isSelected
-                      ? 'bg-indigo-600 text-white font-bold shadow-sm'
-                      : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
-                  }`}
-                >
-                  <span className="font-mono text-[11px]">{cand.mid}</span>
-                  <span>{cand.title}</span>
-                  <span className={`text-[10px] px-1 py-0.2 rounded font-mono ${isSelected ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-900 text-slate-400'}`}>
-                    {cand.badge}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* Inline Feedback Notice Banner */}
@@ -636,24 +596,50 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
         </div>
       )}
 
-      {/* Global Overdue Todo Alert Strip */}
-      {overdueTodosCount > 0 && activeTab !== 'todos' && (
-        <div className="bg-rose-950/40 border border-rose-700/70 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 text-xs text-rose-200">
-            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>
-              <span className="font-bold text-rose-100">個人待辦逾期提醒：</span>
-              您目前有 <span className="font-bold text-rose-300">{overdueTodosCount} 項</span>待辦任務已超過截止時間
-              {dueTodayTodosCount > 0 ? `（另有 ${dueTodayTodosCount} 項今日到期）` : ''}，請前往個人待辦任務面板拖曳更新進度並同步至 GAS 後端。
-            </span>
+      {/* Startup Floating Overdue Todo Toast (Auto-Dismiss in 10s) */}
+      {showOverdueStartupToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-[120] w-[calc(100%-1.5rem)] max-w-xl pointer-events-auto"
+        >
+          <div className="bg-rose-950/95 backdrop-blur-md border border-rose-600/80 shadow-2xl rounded-2xl px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5 text-xs text-rose-100 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-rose-100">個人待辦逾期提醒</span>
+                  <span className="text-[11px] font-mono font-bold text-rose-200 bg-rose-900/80 border border-rose-700 px-1.5 py-0.5 rounded-md">
+                    {overdueToastSecondsLeft} 秒後自動關閉
+                  </span>
+                </div>
+                <p className="leading-relaxed text-rose-200">
+                  您目前有 <span className="font-bold text-rose-100">{overdueTodosCount} 項</span>待辦任務已超過截止時間
+                  {dueTodayTodosCount > 0 ? `（另有 ${dueTodayTodosCount} 項今日到期）` : ''}，可前往個人待辦任務面板調整進度並同步 GAS 後端。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setOverdueToastSecondsLeft(0);
+                  setActiveTab('todos');
+                }}
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shrink-0 cursor-pointer transition-colors"
+              >
+                開啟個人待辦任務面板 →
+              </button>
+              <button
+                type="button"
+                aria-label="關閉提醒"
+                onClick={() => setOverdueToastSecondsLeft(0)}
+                className="px-2 py-1 rounded-lg text-rose-300 hover:text-white hover:bg-rose-900/80 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setActiveTab('todos')}
-            className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shrink-0 cursor-pointer transition-colors"
-          >
-            前往個人待辦任務面板 →
-          </button>
         </div>
       )}
 
@@ -1280,43 +1266,6 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
                 onClose={() => setPreviewSheetTab(null)}
               />
             )}
-
-            {/* Simulation Tester for Unrenewed Read-Only Mode */}
-            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 flex-wrap">
-                <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="font-semibold text-slate-200">未續約唯讀防護驗證：</span>
-                <select
-                  value={testModuleKey}
-                  onChange={(e) => setTestModuleKey(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-indigo-300 cursor-pointer focus:outline-none"
-                >
-                  {ORDERABLE_SOFTWARE_CATALOG.map((item) => (
-                    <option key={item.key} value={item.key}>
-                      {item.title} ({item.codeLabel})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleModuleExpiryTest(true)}
-                  className="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-700 text-rose-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <Lock className="w-3 h-3" />
-                  <span>模擬未續約到期（唯讀禁新增）</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleModuleExpiryTest(false)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700 text-emerald-200 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
-                >
-                  <Unlock className="w-3 h-3" />
-                  <span>恢復有效授權（解鎖讀寫）</span>
-                </button>
-              </div>
-            </div>
 
             {/* Worksheet Tabs Read/Write Permission Status Table (Mobile 2D Scrollable) */}
             <div className="overflow-x-auto overscroll-x-contain touch-pan-x [-webkit-overflow-scrolling:touch] border border-slate-800 rounded-xl">

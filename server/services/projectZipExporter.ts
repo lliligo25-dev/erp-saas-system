@@ -77,22 +77,47 @@ function collectProjectFiles(rootDir: string, currentRel = ''): Array<{ relPath:
   return results;
 }
 
-export function buildProjectSourceZip(rootDir = process.cwd()): {
+export interface ZipExtraFile {
+  relPath: string;
+  content: string | Buffer;
+}
+
+export function buildProjectSourceZip(
+  rootDir = process.cwd(),
+  extraFiles: ZipExtraFile[] = []
+): {
   buffer: Buffer;
   fileCount: number;
 } {
-  const files = collectProjectFiles(rootDir);
+  const diskFiles = collectProjectFiles(rootDir);
+  const extraPaths = new Set(extraFiles.map((e) => e.relPath));
+  const entries: Array<{ relPath: string; raw: Buffer; mtime: Date }> = diskFiles
+    .filter((f) => !extraPaths.has(f.relPath))
+    .map((f) => ({
+      relPath: f.relPath,
+      raw: fs.readFileSync(f.absPath),
+      mtime: fs.statSync(f.absPath).mtime,
+    }));
+
+  const now = new Date();
+  for (const extra of extraFiles) {
+    entries.push({
+      relPath: extra.relPath,
+      raw: Buffer.isBuffer(extra.content) ? extra.content : Buffer.from(extra.content, 'utf8'),
+      mtime: now,
+    });
+  }
+
   const localChunks: Buffer[] = [];
   const centralChunks: Buffer[] = [];
   let offset = 0;
 
-  for (const file of files) {
-    const raw = fs.readFileSync(file.absPath);
-    const stat = fs.statSync(file.absPath);
-    const { time, date } = toDosTimeDate(stat.mtime);
+  for (const entry of entries) {
+    const raw = entry.raw;
+    const { time, date } = toDosTimeDate(entry.mtime);
     const compressed = zlib.deflateRawSync(raw, { level: 6 });
     const crc = crc32(raw);
-    const nameBuf = Buffer.from(file.relPath, 'utf8');
+    const nameBuf = Buffer.from(entry.relPath, 'utf8');
 
     const localHeader = Buffer.alloc(30);
     localHeader.writeUInt32LE(0x04034b50, 0);
@@ -138,14 +163,14 @@ export function buildProjectSourceZip(rootDir = process.cwd()): {
   eocd.writeUInt32LE(0x06054b50, 0);
   eocd.writeUInt16LE(0, 4);
   eocd.writeUInt16LE(0, 6);
-  eocd.writeUInt16LE(files.length, 8);
-  eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
   eocd.writeUInt32LE(centralDirBuf.length, 12);
   eocd.writeUInt32LE(offset, 16);
   eocd.writeUInt16LE(0, 20);
 
   return {
     buffer: Buffer.concat([...localChunks, centralDirBuf, eocd]),
-    fileCount: files.length,
+    fileCount: entries.length,
   };
 }

@@ -628,7 +628,7 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
               }`}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>客戶預約前台模擬 (實際下單測試)</span>
+              <span>客戶線上預約前台</span>
             </button>
 
             <button
@@ -840,7 +840,7 @@ export const BookingSystemView: React.FC<BookingSystemViewProps> = ({
                     {filteredAppointments.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="py-10 text-center text-slate-500">
-                          目前沒有符合條件的預約訂單。您可以點擊上方「新增預約」或切換至「客戶預約前台模擬」進行實機預約測試！
+                          目前沒有符合條件的預約訂單。您可以點擊上方「新增預約」或切換至「客戶線上預約前台」建立預約。
                         </td>
                       </tr>
                     ) : (

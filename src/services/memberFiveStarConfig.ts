@@ -639,100 +639,51 @@ export function getCurrentDateTimeStr(): string {
 
 const STORAGE_PREFIX = 'AIS_FIVESTAR_MODULES_V1_';
 
-function createDefaultSeedForModule(sysType: string, memberMid: string): DynamicRecord[] {
-  const today = getOffsetDateStr(0);
-  const tomorrow = getOffsetDateStr(1);
-  const nowStr = new Date().toLocaleDateString();
+const LEGACY_DEMO_RECORD_SIGNATURES = new Set<string>([
+  'ATM-001|林佳穎',
+  'ATM-002|陳志強',
+  'ATT-001|林佳穎',
+  'ATT-002|陳志強',
+  'PRM-001|AI 產銷合一智聯健康飲禮盒',
+  'PRM-002|頂級冷壓初榨植萃油',
+  'PRT-001|黃冠傑',
+  'PRT-002|張雅婷',
+  'TCM-001|吳明宏',
+  'TCT-001|吳明宏',
+  'TCT-002|周美玲',
+  'NLM-001|劉欣怡',
+  'NLT-001|劉欣怡',
+  'ELM-001|林福氣伯伯',
+  'ELT-001|林福氣伯伯',
+  'FRM-001|玉井頂級愛文芒果禮盒',
+  'FRT-001|玉井頂級愛文芒果禮盒',
+  'GRM-001|有機履歷舒康雞胸肉',
+  'GRT-001|有機履歷舒康雞胸肉',
+  'ASM-001|仁愛康健整合診所',
+  'AST-001|仁愛康健整合診所',
+  'BKM-001|AI 軟體 1+1 一對一深度體驗導覽',
+  'BKM-002|產銷門市合作與系統導入諮詢',
+  'TDM-001|新會員 AI 1+1 開通輔導計畫',
+  'TDM-002|週期續約與產銷訂單月度檢視',
+  'TDT-001|聯繫今日預約體驗客戶確認上線時段',
+  'TDT-002|整理本週門店教育講座活動花絮發布',
+  'TDT-003|確認未續約體驗名單與關懷通知',
+]);
 
-  switch (sysType) {
-    case 'ATOMY_M':
-      return [
-        { ID: 'ATM-001', 經營狀態: '經營者', 姓名: '林佳穎', 會員編號: 'AT-88201', 手機: '0911-223-344', Line: 'jiaying_lin', 推薦人: memberMid, 安置人: memberMid, 線別: '左線 A 區', 備註與需求: '每月固定回購蜂蜜飲與益生菌', 更新時間: nowStr },
-        { ID: 'ATM-002', 經營狀態: '愛用者', 姓名: '陳志強', 會員編號: 'AT-88202', 手機: '0928-445-566', Line: 'chiang_chen', 推薦人: memberMid, 安置人: memberMid, 線別: '右線 B 區', 備註與需求: '偏好生活日用品與口腔護理組', 更新時間: nowStr },
-      ];
-    case 'ATOMY_T':
-      return [
-        { ID: 'ATT-001', 狀態: '跟進中', 姓名: '林佳穎', 跟進日期: tomorrow, 消費項目: '煥力飲 4 盒禮盒組', 消費金額: '12800', 需求備註: '協助了解自用轉經營回饋制度', 更新時間: nowStr },
-        { ID: 'ATT-002', 狀態: '已成交', 姓名: '陳志強', 跟進日期: today, 消費項目: '凝萃煥膚六部曲', 消費金額: '6680', 需求備註: '已完成配送與使用教學', 更新時間: nowStr },
-      ];
-    case 'PRODUCT_M':
-      return [
-        { ID: 'PRM-001', 類別: '保健食品', 品名: 'AI 產銷合一智聯健康飲禮盒', 價格: '1980', 單位: '盒', 備註: '會員體驗組熱銷第一名', 更新時間: nowStr },
-        { ID: 'PRM-002', 類別: '食品', 品名: '頂級冷壓初榨植萃油', 價格: '960', 單位: '瓶', 備註: '產地直送溯源認證', 更新時間: nowStr },
-      ];
-    case 'PRODUCT_T':
-      return [
-        { ID: 'PRT-001', 狀態: '待處理', 姓名: '黃冠傑', 品名: 'AI 產銷合一智聯健康飲禮盒', 數量: '2', 總金額: '3960', 寄送地址: '台北市中山區南京東路三段', 備註: '請附體驗券 2 張', 更新時間: today },
-        { ID: 'PRT-002', 狀態: '已出貨', 姓名: '張雅婷', 品名: '頂級冷壓初榨植萃油', 數量: '3', 總金額: '2880', 寄送地址: '新北市板橋區民生路二段', 備註: '物流單號 #TW88291', 更新時間: today },
-      ];
-    case 'TCM_M':
-      return [
-        { ID: 'TCM-001', 狀態: '預約中', 客戶姓名: '吳明宏', 手機: '0932-112-889', 性別: '男', 預約日期: today, 預約時段: '15:00', 負責推拿師: '李永吉', 部位與症狀: '長期久坐肩頸痠痛', 處置與備註: '偏好深層指壓與肩頸鬆筋', 更新時間: nowStr },
-      ];
-    case 'TCM_T':
-      return [
-        { ID: 'TCT-001', 狀態: '預約中', 客戶姓名: '吳明宏', 預約日期: today, 預約時段: '15:00', 負責推拿師: '李永吉', 施作項目: '全身推拿', 服務節數: '2.0', 開始時間: '', 結束時間: '', 消費金額: '1600', 處置與備註: '肩頸加強鬆筋', 更新時間: today },
-        { ID: 'TCT-002', 狀態: '執行中', 客戶姓名: '周美玲', 預約日期: today, 預約時段: '13:30', 負責推拿師: '李佳馨', 施作項目: '腳底', 服務節數: '1.0', 開始時間: `${today}T13:32`, 結束時間: '', 消費金額: '900', 處置與備註: '足底反射區調理中', 更新時間: today },
-      ];
-    case 'NAIL_M':
-      return [
-        { ID: 'NLM-001', 狀態: '預約中', 客戶姓名: '劉欣怡', 手機: '0988-331-209', 指定美甲師: 'Mia', 預約日期: tomorrow, 預約時段: '14:30', 施作項目: '造型設計', 預估金額: '1580', 備註與需求: '極簡法式貓眼，甲面較薄需做建構加厚', 更新時間: nowStr },
-      ];
-    case 'NAIL_T':
-      return [
-        { ID: 'NLT-001', 狀態: '預約中', 客戶姓名: '劉欣怡', 預約日期: tomorrow, 預約時段: '14:30', 指定美甲師: 'Mia', 施作項目: '造型設計', 開始時間: '', 結束時間: '', 消費金額: '1580', 更新時間: today },
-      ];
-    case 'ELDER_M':
-      return [
-        { ID: 'ELM-001', 所屬班別: '一班', 姓名: '林福氣伯伯', 長者編號: 'ELD-101', 長者手機: '0910-554-321', 班長: '陳班長', 緊急電話: '02-2700-1122', 家屬聯絡人: '林先生 (長子)', 關懷進度: '每週定期電訪關懷', 健康與備註: '血壓穩定，每週參與體適能課', 更新時間: nowStr },
-      ];
-    case 'ELDER_T':
-      return [
-        { ID: 'ELT-001', 狀態: '待訪視', 姓名: '林福氣伯伯', 訪視日期: today, 健康數據: '血壓 126/78 · 心率 72', 關懷內容: '電話關懷用藥狀況與營養餐配送', 後續追蹤: '預約下週社區量測追蹤', 更新時間: today },
-      ];
-    case 'FRUIT_M':
-      return [
-        { ID: 'FRM-001', 類別: '當季水果', 品名: '玉井頂級愛文芒果禮盒', 單價: '880', 單位: '5斤箱', 庫存量: '60', 產地: '台南玉井', 供應商: '玉井果農產銷班', 備註: '在欉紅自然熟成', 更新時間: nowStr },
-      ];
-    case 'FRUIT_T':
-      return [
-        { ID: 'FRT-001', 狀態: '賣出', 品名: '玉井頂級愛文芒果禮盒', 日期: today, 數量: '4', 總金額: '3520', 經手人: memberMid, 備註: '社區團購面交取貨', 更新時間: today },
-      ];
-    case 'GROCERY_M':
-      return [
-        { ID: 'GRM-001', 狀態: '庫存中', 品名: '有機履歷舒康雞胸肉', 物品類別: '生鮮肉品', 存放位置: '冷藏', 數量: '6', 單位: '包', 購買日期: today, 有效期限: getOffsetDateStr(5), 備註: '每日高蛋白補貨基準 5 包', 更新時間: nowStr },
-      ];
-    case 'GROCERY_T':
-      return [
-        { ID: 'GRT-001', 狀態: '入庫', 品名: '有機履歷舒康雞胸肉', 購買日期: today, 有效期限: getOffsetDateStr(5), 數量: '6', 處理方式: '分裝冷藏保存', 備註: '產銷直送批號 #SC09', 更新時間: today },
-      ];
-    case 'ASSOC_M':
-      return [
-        { ID: 'ASM-001', 會籍狀態: '理監事', 診所與單位: '仁愛康健整合診所', 負責人姓名: '陳建國院長', 手機: '0933-888-100', 擔任職務: '常務理事', 繳費狀態: '本年度已繳', 入會年份: '2023', 單位地址: '台中市大甲區仁愛路四段', 備註: '中醫藥整合照護專長', 更新時間: nowStr },
-      ];
-    case 'ASSOC_T':
-      return [
-        { ID: 'AST-001', 狀態: '未繳', 診所與單位: '仁愛康健整合診所', 年度: '2026', 繳費項目: '2026 年度常年會費暨聯誼晚宴', 金額: '3600', 備註: '待財務確認入帳核銷', 更新時間: today },
-      ];
-    case 'BOOKING_M':
-      return [
-        { ID: 'BKM-001', 狀態: '開放預約', 服務名稱: 'AI 軟體 1+1 一對一深度體驗導覽', 服務時長: '45', 費用: '0', 會面方式: '線上視訊會議', 簡介: '專人示範通訊錄 CRM、活動行銷與雙軌模組設定，含 30 天免費體驗開通輔導', 更新時間: nowStr },
-        { ID: 'BKM-002', 狀態: '開放預約', 服務名稱: '產銷門市合作與系統導入諮詢', 服務時長: '60', 費用: '0', 會面方式: '實體面談 / 門店', 簡介: '針對個人接案、美甲、推拿或生鮮團購主提供雙軌帳務管理規劃', 更新時間: nowStr },
-      ];
-    case 'TODO_M':
-      return [
-        { ID: 'TDM-001', 狀態: '進行中', 專案名稱: '新會員 AI 1+1 開通輔導計畫', 類別: '客戶跟進', 優先級: '高優先', 負責人: memberMid, 目標日期: tomorrow, 說明與備註: '協助新推薦夥伴完成通訊錄 CRM 與活動行銷啟用及預約排班設定', 更新時間: nowStr },
-        { ID: 'TDM-002', 狀態: '長期規劃', 專案名稱: '週期續約與產銷訂單月度檢視', 類別: '財務帳務', 優先級: '中優先', 負責人: memberMid, 目標日期: getOffsetDateStr(7), 說明與備註: '定期檢查名下雙軌節點續約效期與 100 點閉環獎金明細', 更新時間: nowStr },
-      ];
-    case 'TODO_T':
-      return [
-        { ID: 'TDT-001', 狀態: '待處理', 事項標題: '聯繫今日預約體驗客戶確認上線時段', 專案名稱: '新會員 AI 1+1 開通輔導計畫', 優先級: '緊急重要', 截止日期: today, 提醒時間: '10:30', 承辦人: memberMid, 結束時間: '', 詳細說明: '提前傳送線上會議連結與體驗手冊，完成打卡紀錄', 更新時間: today },
-        { ID: 'TDT-002', 狀態: '進行中', 事項標題: '整理本週門店教育講座活動花絮發布', 專案名稱: '新會員 AI 1+1 開通輔導計畫', 優先級: '高', 截止日期: tomorrow, 提醒時間: '15:00', 承辦人: memberMid, 結束時間: '', 詳細說明: '上傳現場照片至 EVENT_T 並通知直推夥伴報名下場次', 更新時間: today },
-        { ID: 'TDT-003', 狀態: '待處理', 事項標題: '確認未續約體驗名單與關懷通知', 專案名稱: '週期續約與產銷訂單月度檢視', 優先級: '緊急重要', 截止日期: getOffsetDateStr(-1), 提醒時間: '18:00', 承辦人: memberMid, 結束時間: '', 詳細說明: '提醒 30 天體驗即將屆滿會員完成 100 元月租續約以避免觸發熔斷', 更新時間: today },
-      ];
-    default:
-      return [];
-  }
+function isLegacyVirtualDemoRecord(rec: DynamicRecord): boolean {
+  if (!rec || !rec.ID) return false;
+  const id = String(rec.ID).trim();
+  const candidateTitle = String(
+    rec['姓名'] ||
+      rec['客戶姓名'] ||
+      rec['品名'] ||
+      rec['診所與單位'] ||
+      rec['服務名稱'] ||
+      rec['專案名稱'] ||
+      rec['事項標題'] ||
+      ''
+  ).trim();
+  return LEGACY_DEMO_RECORD_SIGNATURES.has(`${id}|${candidateTitle}`);
 }
 
 export function getMemberUnlockedPacks(memberMid: string): string[] {
@@ -768,14 +719,20 @@ export function loadMemberDynamicRecords(memberMid: string, sysType: string): Dy
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
-      return JSON.parse(raw) as DynamicRecord[];
+      const parsed = JSON.parse(raw) as DynamicRecord[];
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((rec) => !isLegacyVirtualDemoRecord(rec));
+        if (cleaned.length !== parsed.length) {
+          saveMemberDynamicRecords(memberMid, sysType, cleaned);
+        }
+        return cleaned;
+      }
     }
   } catch {
     // ignore
   }
-  const seeded = createDefaultSeedForModule(sysType, memberMid);
-  saveMemberDynamicRecords(memberMid, sysType, seeded);
-  return seeded;
+  // 正式上線模式：新會員與未建檔模組皆維持乾淨空白，絕不塞入任何虛擬示範資料
+  return [];
 }
 
 export function saveMemberDynamicRecords(memberMid: string, sysType: string, list: DynamicRecord[]) {

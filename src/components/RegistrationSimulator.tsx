@@ -16,7 +16,6 @@ import {
   Sparkles, 
   CheckCircle2, 
   Clock, 
-  Play, 
   Contact,
   FileText,
   Phone,
@@ -102,15 +101,6 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
     message: string;
   } | null>(null);
 
-  const [batchCount, setBatchCount] = useState<number>(5);
-  const [batchRunning, setBatchRunning] = useState(false);
-
-  const sampleNames = [
-    '陳雅婷', '林志豪', '張淑芬', '黃冠宇', '李美玲', 
-    '吳宗憲', '劉怡君', '蔡家豪', '楊佩君', '許家瑋',
-    '鄭雅芳', '謝建國', '洪鈺涵', '郭承翰', '曾靜怡'
-  ];
-
   const handleClearForm = () => {
     setName('');
     setPhone('');
@@ -122,21 +112,6 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
     setIdNumberMasked('');
     setDiscussionContent('');
     setNextStepPlan('');
-  };
-
-  const handleFillTestSample = () => {
-    const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-    const rand8 = Math.floor(10000000 + Math.random() * 90000000);
-    setName(randomName);
-    setPhone(`09${rand8}`);
-    setTel(`02-${Math.floor(20000000 + Math.random() * 70000000)}`);
-    setLine(`demo_${rand8.toString().slice(0, 4)}`);
-    setEmail(`demo${rand8.toString().slice(0, 4)}@example.com`);
-    setAddress('台北市大安區忠孝東路四段 128 號');
-    setPhotoUrl('');
-    setIdNumberMasked(`A1${rand8.toString().slice(0, 3)}***${rand8.toString().slice(5, 8)}`);
-    setDiscussionContent('測試開通 AI 軟體 1+1 與 30 天免費體驗。');
-    setNextStepPlan('引導登入個人工作台並測試試算表同步。');
   };
 
   const handleSingleRegister = (e?: React.FormEvent) => {
@@ -166,32 +141,9 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
       setIsSubmitting(false);
       onNodeCreated();
 
-      // 開通完成後恢復正式空白表單，避免誤把上一位或測試資料再次送出
+      // 開通完成後恢復正式空白表單，避免誤把上一位資料再次送出
       handleClearForm();
     }, 150);
-  };
-
-  const handleBatchRegister = async (count: number) => {
-    setBatchRunning(true);
-    for (let i = 0; i < count; i++) {
-      const randomName = sampleNames[i % sampleNames.length] + `_${Math.floor(Math.random() * 900 + 100)}`;
-      const res = erpEngine.registerNewMember({
-        name: randomName,
-        phone: `09${Math.floor(10000000 + Math.random() * 90000000)}`,
-        idNumberMasked: `B1${Math.floor(10000000 + Math.random() * 90000000).toString().substring(0, 3)}***`,
-        sponsorMid: sponsorMid.trim(),
-        storeId,
-        centerId,
-        discussionContent: `批次開通第 ${i + 1} 位會員 AI 軟體 1+1 體驗`,
-        nextStepPlan: '邀約參加近期線上新人說明會',
-        activateBookingSystem,
-      });
-      setLastResult(res);
-      onNodeCreated();
-      // Brief delay for visual satisfaction
-      await new Promise((r) => setTimeout(r, 60));
-    }
-    setBatchRunning(false);
   };
 
   const allMembers = erpEngine.getAllMembers();
@@ -246,15 +198,6 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
                 <span>填寫開通資料 (正式空白表單)</span>
               </h3>
               <div className="flex items-center gap-1.5">
-                {!scopedMemberMode && (
-                  <button
-                    type="button"
-                    onClick={handleFillTestSample}
-                    className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-amber-300 cursor-pointer transition-colors"
-                  >
-                    帶入測試範例
-                  </button>
-                )}
                 {(name || phone || tel || line || email || address || idNumberMasked) && (
                   <button
                     type="button"
@@ -335,7 +278,7 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
                     value={line}
                     onChange={(e) => setLine(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-emerald-400 focus:outline-none focus:border-indigo-500 font-mono"
-                    placeholder="wang_daming"
+                    placeholder="請輸入 Line ID"
                   />
                 </div>
                 <div>
@@ -347,7 +290,7 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                    placeholder="daming@example.com"
+                    placeholder="請輸入電子信箱"
                   />
                 </div>
               </div>
@@ -469,7 +412,7 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
 
               <button
                 type="submit"
-                disabled={isSubmitting || batchRunning}
+                disabled={isSubmitting}
                 className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 via-sky-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg"
               >
                 <Sparkles className="w-4 h-4" />
@@ -477,46 +420,6 @@ export const RegistrationSimulator: React.FC<RegistrationSimulatorProps> = ({
               </button>
             </form>
           </div>
-
-          {/* Batch simulation module (Hidden in scopedMemberMode) */}
-          {!scopedMemberMode && (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <Play className="w-4 h-4 text-emerald-400" />
-                <span>批次壓力開通模擬 (Batch AI Activation)</span>
-              </h3>
-              <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                連續為多筆新會員開通 AI 軟體 1+1，即時觀測雙軌二元樹 BFS 智慧由上至下、由左至右自動滑落與填補空位的過程。
-              </p>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleBatchRegister(5)}
-                  disabled={batchRunning}
-                  className="flex-1 py-2 px-3 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
-                >
-                  模擬 +5 人
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleBatchRegister(10)}
-                  disabled={batchRunning}
-                  className="flex-1 py-2 px-3 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
-                >
-                  模擬 +10 人
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleBatchRegister(25)}
-                  disabled={batchRunning}
-                  className="flex-1 py-2 px-3 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
-                >
-                  模擬 +25 人
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Right: Dual Node Dispatch Realtime Receipt & Member Ledger */}

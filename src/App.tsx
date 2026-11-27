@@ -44,6 +44,7 @@ import {
 import { LineInAppBanner } from './components/LineInAppBanner';
 import { MobileSettingsDrawer } from './components/MobileSettingsDrawer';
 import { MobileDeviceShell, MobilePhonePreset } from './components/MobileDeviceShell';
+import welcomeSplashImg from './assets/images/welcome_splash_1795778610216.jpg';
 import { Search, RotateCcw, ShieldCheck, Menu } from 'lucide-react';
 
 // 方案 B 保密原則：總部機密儀表板、閉環清算器、全網樹圖與 GAS/MySQL 程式碼僅動態延遲載入，
@@ -135,6 +136,7 @@ export default function App() {
   const [publicJoinSponsorMid] = useState<string | null>(initialPortalInfo.sponsorMid);
 
   const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [splashReady, setSplashReady] = useState<boolean>(false);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [currentTab, setCurrentTab] = useState<string>('overview');
   const [stats, setStats] = useState<SystemStats>(() => erpEngine.getStats());
@@ -437,12 +439,39 @@ export default function App() {
     setCurrentTab('member_portal');
   };
 
-  // Waiting for server HttpOnly session verification
-  if (!authChecked) {
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSplashReady(true), 1200);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Startup Welcome Splash Screen while Render server wakes up & session verifies
+  if (!authChecked || !splashReady) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-xs gap-2">
-        <ShieldCheck className="w-4 h-4 text-emerald-400 animate-pulse" />
-        <span>正在向伺服器驗證安全工作階段...</span>
+      <div className="min-h-screen min-h-[100dvh] bg-[radial-gradient(circle_at_top,#1e293b_0%,#020617_70%)] text-slate-100 flex items-center justify-center p-5">
+        <div className="w-full max-w-[520px] rounded-3xl overflow-hidden border border-amber-400/35 bg-slate-900 shadow-[0_24px_64px_rgba(0,0,0,0.65)]">
+          <div className="relative aspect-video overflow-hidden bg-slate-950">
+            <img
+              src={welcomeSplashImg}
+              alt="歡迎再次光臨"
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover object-center"
+            />
+            <div className="absolute inset-0 bg-gradient-to-b from-slate-950/20 via-slate-950/45 to-slate-950/90 flex flex-col items-center justify-end px-5 py-6 text-center">
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-[0.14em] text-white drop-shadow-[0_4px_18px_rgba(0,0,0,0.8)]">
+                歡迎再次光臨
+              </h1>
+              <p className="mt-2 text-base sm:text-lg font-bold tracking-[0.16em] text-amber-200 drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
+                再等一下！
+              </p>
+            </div>
+          </div>
+          <div className="px-5 py-4 flex items-center justify-center gap-2.5 text-xs sm:text-sm text-slate-300 tracking-wide">
+            <ShieldCheck className="w-4 h-4 text-amber-300 animate-pulse shrink-0" />
+            <span>
+              {authChecked ? '安全驗證完成，即將進入系統...' : '系統正在啟動連線中，請稍候片刻...'}
+            </span>
+          </div>
+        </div>
       </div>
     );
   }

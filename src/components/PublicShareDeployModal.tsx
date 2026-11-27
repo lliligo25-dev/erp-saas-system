@@ -40,6 +40,7 @@ import {
 import {
   GasBridgeRemoteState,
   GasHydrationStatusRemote,
+  apiDownloadHqGasCode,
   apiDownloadHqProjectZip,
   apiGetHqGasBridge,
   apiSaveAndTestHqGasBridge,
@@ -163,6 +164,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
   } | null>(null);
   const [hydrationFeedback, setHydrationFeedback] = useState<GasHydrationStatusRemote | null>(null);
   const [zipDownloading, setZipDownloading] = useState<boolean>(false);
+  const [gsDownloading, setGsDownloading] = useState<boolean>(false);
   const [zipFeedback, setZipFeedback] = useState<{
     ok: boolean;
     message: string;
@@ -407,7 +409,27 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
     }
     setZipFeedback({
       ok: true,
-      message: `已下載整包完整專案 (erp-saas-system.zip${res.fileCount ? `，共 ${res.fileCount} 個原始檔案` : ''})！解壓縮後即可透過 GitHub Desktop 上傳至 Private 倉庫並部署到 Zeabur / Render。`,
+      message: `已下載最新版完整專案壓縮檔 (erp-saas-system.zip${res.fileCount ? `，共 ${res.fileCount} 個檔案` : ''}，已內含最新版 Code.gs v3.0 與開機歡迎圖檔)！解壓縮後即可透過 GitHub Desktop 上傳至 Private 倉庫並部署到 Render。`,
+    });
+  };
+
+  const handleDownloadGasCode = async () => {
+    if (!isHqStaff || gsDownloading) return;
+    setGsDownloading(true);
+    setZipFeedback(null);
+    const res = await apiDownloadHqGasCode();
+    setGsDownloading(false);
+    if (!res.ok) {
+      setZipFeedback({
+        ok: false,
+        message: res.error || '無法下載最新版 Code.gs，請確認已登入總部帳號。',
+      });
+      return;
+    }
+    setZipFeedback({
+      ok: true,
+      message:
+        '已下載最新版 Code.gs（v3.0 正式上線潔淨版 · 含 HD 高畫質照片與 10 大模組同步）！請貼入 Google Apps Script 並建立新版本部署。',
     });
   };
 
@@ -759,29 +781,42 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
 
           {activeTab === 'deploy' && (
             <>
-              {/* Download Full Project ZIP Card (Strictly HQ-Only) */}
+              {/* Download Full Project ZIP & Latest Code.gs Card (Strictly HQ-Only) */}
               <div className="p-4 rounded-xl bg-gradient-to-br from-sky-950/60 via-slate-950 to-indigo-950/50 border border-sky-500/40 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="space-y-1">
                     <div className="font-bold text-sky-200 flex items-center gap-2 text-sm">
                       <Package className="w-4 h-4 text-sky-400" />
-                      <span>Download app / 一鍵打包下載整包專案 (.zip)</span>
+                      <span>最新版專案壓縮檔 (.zip) ＆ 最新版 Code.gs (.gs)</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
-                      直接在系統內打包下載完整專案原始碼（已自動排除敏感金鑰與龐大相依套件），解壓後即可推上 GitHub Private 倉庫或部署至 Zeabur / Render / Cloud Run。
+                      一鍵下載最新版完整專案壓縮檔（已內含最新版 Code.gs v3.0、HD 高畫質設定與開機歡迎圖檔，並排除敏感金鑰與龐大套件），亦可單獨下載最新 Code.gs 貼入 Google Apps Script 部署。
                     </p>
                   </div>
 
                   {isHqStaff ? (
-                    <button
-                      type="button"
-                      onClick={handleDownloadProjectZip}
-                      disabled={zipDownloading}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shrink-0 disabled:opacity-60"
-                    >
-                      <Download className={`w-4 h-4 ${zipDownloading ? 'animate-bounce' : ''}`} />
-                      <span>{zipDownloading ? '正在打包壓縮...' : 'Download app / 下載 (↓ .zip)'}</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleDownloadProjectZip}
+                        disabled={zipDownloading || gsDownloading}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shrink-0 disabled:opacity-60"
+                      >
+                        <Download className={`w-4 h-4 ${zipDownloading ? 'animate-bounce' : ''}`} />
+                        <span>
+                          {zipDownloading ? '正在打包壓縮...' : '下載最新版專案 (↓ .zip，內含 Code.gs)'}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDownloadGasCode}
+                        disabled={gsDownloading || zipDownloading}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shrink-0 disabled:opacity-60"
+                      >
+                        <Code2 className={`w-4 h-4 ${gsDownloading ? 'animate-bounce' : ''}`} />
+                        <span>{gsDownloading ? '正在下載 .gs...' : '下載最新版 Code.gs (↓ .gs)'}</span>
+                      </button>
+                    </div>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-amber-300 font-semibold shrink-0">
                       <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
