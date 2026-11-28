@@ -4,6 +4,7 @@
  */
 
 import type { SettlementBreakdown } from '../types/erp.ts';
+import { apiSaveMemberWorkspaceMeta } from './confidentialApiClient.ts';
 
 export type FieldType =
   | 'select'
@@ -55,7 +56,7 @@ export const INDUSTRY_PACKS: IndustryPackMeta[] = [
   { baseKey: 'ATOMY', title: '艾多美會員', desc: '艾多美會員主檔 (推薦人/安置人/左右線別) + 銷售跟進' },
   { baseKey: 'ELDER', title: '長者關懷紀錄', desc: '長者關懷紀錄 (班別/班長/緊急電話/家屬) + 訪視紀錄' },
   { baseKey: 'PRODUCT', title: '購物車產品', desc: '購物車產品主檔 (類別/價格/單位) + 訂單出貨紀錄' },
-  { baseKey: 'TCM', title: '推拿預約管理', desc: '推拿預約管理 (推拿師/部位症狀/處置) + 推拿流水線' },
+  { baseKey: 'TCM', title: '傳統理療師系統（推拿調理）', desc: '傳統理療師系統 (理療師/部位症狀/調理處置) + 理療預約流水線' },
   { baseKey: 'FRUIT', title: '水果店管理', desc: '水果店管理 (單價/庫存/產地/供應商) + 進銷存流水' },
   { baseKey: 'GROCERY', title: '家庭食材庫存 (FIFO)', desc: '家庭食材庫存 FIFO (存放位置/效期) + 進出庫紀錄' },
   { baseKey: 'NAIL', title: '美甲醫美預約', desc: '美甲醫美預約 (美甲師/施作項目/預估金額) + 流水線' },
@@ -708,6 +709,7 @@ export function saveMemberUnlockedPacks(memberMid: string, packs: string[]) {
   } catch {
     // ignore
   }
+  scheduleMemberWorkspaceMetaPush(memberMid);
 }
 
 export function initNewMemberDefaultPacks(memberMid: string) {
@@ -992,6 +994,7 @@ export function saveMemberModuleSubscriptions(
   } catch {
     // ignore
   }
+  scheduleMemberWorkspaceMetaPush(memberMid);
 }
 
 export function getMemberOrderReceipts(memberMid: string): SoftwareOrderReceipt[] {
@@ -1015,6 +1018,7 @@ export function appendMemberOrderReceipt(memberMid: string, receipt: SoftwareOrd
   } catch {
     // ignore
   }
+  scheduleMemberWorkspaceMetaPush(memberMid);
 }
 
 // ============================================================
@@ -1137,6 +1141,7 @@ export function saveMemberCustomModules(memberMid: string, modules: CustomMember
   } catch {
     // ignore
   }
+  scheduleMemberWorkspaceMetaPush(memberMid);
 }
 
 export function addMemberCustomModule(
@@ -1260,5 +1265,317 @@ export function saveMemberSidebarTopOrder(memberMid: string, order: SidebarTopNa
     // ignore
   }
 }
+
+// ============================================================
+// 跨裝置即時雲端同步引擎（已開通系統 / 訂閱授權 / 專業職業 / 自訂模組 / 收據）
+// 確保手機 <-> 桌機即時同步，且伺服器關機／Render 休眠重啟後絕不需重新開通
+// ============================================================
+
+export const MEMBER_WORKSPACE_META_UPDATED_EVENT = 'ais-member-workspace-meta-updated';
+const WORKSPACE_META_TS_PREFIX = 'AIS_WORKSPACE_META_TS_V1_';
+const PROFESSION_KEY_PREFIX = 'ais_member_profession_v1_';
+
+let applyingRemoteWorkspaceSyncDepth = 0;
+const pendingMetaPushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function getMemberProfessionRaw(memberMid: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const val = window.localStorage.getItem(`${PROFESSION_KEY_PREFIX}${memberMid.trim().toUpperCase()}`);
+    return val && val.trim() ? val.trim().toUpperCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setMemberProfessionRaw(memberMid: string, key: string | null) {
+  if (typeof window === 'undefined') return;
+  const normMid = memberMid.trim().toUpperCase();
+  try {
+    if (key && key.trim()) {
+      window.localStorage.setItem(`${PROFESSION_KEY_PREFIX}${normMid}`, key.trim().toUpperCase());
+    } else {
+      window.localStorage.removeItem(`${PROFESSION_KEY_PREFIX}${normMid}`);
+    }
+  } catch {
+    // ignore
+  }
+  scheduleMemberWorkspaceMetaPush(normMid);
+}
+
+function getLocalWorkspaceMetaTs(memberMid: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(`${WORKSPACE_META_TS_PREFIX}${memberMid.trim().toUpperCase()}`);
+  } catch {
+    return null;
+  }
+}
+
+function setLocalWorkspaceMetaTs(memberMid: string, iso: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${WORKSPACE_META_TS_PREFIX}${memberMid.trim().toUpperCase()}`, iso);
+  } catch {
+    // ignore
+  }
+}
+
+function dispatchWorkspaceMetaUpdated(memberMid: string) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent(MEMBER_WORKSPACE_META_UPDATED_EVENT, {
+      detail: { memberMid: memberMid.trim().toUpperCase() },
+    })
+  );
+}
+
+function readRawStoredSubscriptions(memberMid: string): Record<string, SoftwareModuleSubscription> {
+  try {
+    const raw = localStorage.getItem(`${SUB_PREFIX}${memberMid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, SoftwareModuleSubscription>;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+export async function pushMemberWorkspaceMetaNow(memberMid: string): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const normMid = memberMid.trim().toUpperCase();
+  if (!normMid) return false;
+
+  const unlockedPacks = getMemberUnlockedPacks(normMid);
+  const subscriptions = readRawStoredSubscriptions(normMid);
+  const profession = getMemberProfessionRaw(normMid);
+  const customModules = getMemberCustomModules(normMid);
+  const orderReceipts = getMemberOrderReceipts(normMid).slice(0, 35);
+
+  const res = await apiSaveMemberWorkspaceMeta(normMid, {
+    unlockedPacks,
+    subscriptions,
+    profession,
+    customModules,
+    orderReceipts,
+  });
+
+  if (res.ok && res.metaUpdatedAt) {
+    setLocalWorkspaceMetaTs(normMid, res.metaUpdatedAt);
+  }
+  return Boolean(res.ok);
+}
+
+export function scheduleMemberWorkspaceMetaPush(memberMid: string, immediate = false) {
+  if (typeof window === 'undefined') return;
+  const normMid = memberMid.trim().toUpperCase();
+  if (!normMid) return;
+
+  if (applyingRemoteWorkspaceSyncDepth > 0) {
+    return;
+  }
+
+  setLocalWorkspaceMetaTs(normMid, new Date().toISOString());
+  dispatchWorkspaceMetaUpdated(normMid);
+
+  const existingTimer = pendingMetaPushTimers.get(normMid);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    pendingMetaPushTimers.delete(normMid);
+  }
+
+  if (immediate) {
+    void pushMemberWorkspaceMetaNow(normMid);
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    pendingMetaPushTimers.delete(normMid);
+    void pushMemberWorkspaceMetaNow(normMid);
+  }, 180);
+  pendingMetaPushTimers.set(normMid, timer);
+}
+
+export function applyRemoteMemberWorkspaceMeta(
+  memberMid: string,
+  remote: {
+    unlockedPacks?: string[] | null;
+    subscriptions?: Record<string, Record<string, any>> | null;
+    profession?: string | null;
+    customModules?: Array<Record<string, any>> | null;
+    orderReceipts?: Array<Record<string, any>> | null;
+    metaUpdatedAt?: string | null;
+  }
+): {
+  unlockedPacks: string[];
+  customModules: CustomMemberModuleDef[];
+  profession: string | null;
+  needsUploadLocal: boolean;
+} {
+  const normMid = memberMid.trim().toUpperCase();
+  const localPacks = getMemberUnlockedPacks(normMid);
+  const localSubs = readRawStoredSubscriptions(normMid);
+  const localProf = getMemberProfessionRaw(normMid);
+  const localCustoms = getMemberCustomModules(normMid);
+  const localReceipts = getMemberOrderReceipts(normMid);
+  const localTs = getLocalWorkspaceMetaTs(normMid);
+
+  const remoteTs = remote.metaUpdatedAt || null;
+  const serverHasMeta = Boolean(remoteTs);
+  const serverIsNewer = Boolean(
+    remoteTs && (!localTs || new Date(remoteTs).getTime() >= new Date(localTs).getTime())
+  );
+
+  let needsUploadLocal = false;
+
+  // 1. Merge subscriptions monotonically (an activated/renewed module on either device is never lost)
+  const mergedSubs: Record<string, SoftwareModuleSubscription> = { ...localSubs };
+  const remoteSubs = remote.subscriptions && typeof remote.subscriptions === 'object' ? remote.subscriptions : {};
+  const statusRank = (st?: string) =>
+    st === 'ACTIVE_RENEWED' ? 3 : st === 'TRIAL_ACTIVE' ? 2 : st === 'EXPIRED_FROZEN' ? 1 : 0;
+
+  for (const [k, rawSub] of Object.entries(remoteSubs)) {
+    if (!rawSub || typeof rawSub !== 'object') continue;
+    const modKey = k.trim().toUpperCase();
+    const rSub = rawSub as SoftwareModuleSubscription;
+    const lSub = mergedSubs[modKey];
+    if (!lSub) {
+      mergedSubs[modKey] = { ...rSub, moduleKey: modKey };
+    } else {
+      const lRank = statusRank(lSub.status);
+      const rRank = statusRank(rSub.status);
+      const lExp = lSub.expiresAt ? new Date(lSub.expiresAt).getTime() : 0;
+      const rExp = rSub.expiresAt ? new Date(rSub.expiresAt).getTime() : 0;
+      const lRenew = Number(lSub.totalRenewalsCount || 0);
+      const rRenew = Number(rSub.totalRenewalsCount || 0);
+      if (rRank > lRank || rRenew > lRenew || (rRank === lRank && rExp >= lExp)) {
+        mergedSubs[modKey] = {
+          ...lSub,
+          ...rSub,
+          moduleKey: modKey,
+          binaryNodeId: rSub.binaryNodeId || lSub.binaryNodeId,
+          binaryParentId: rSub.binaryParentId || lSub.binaryParentId,
+          binaryPosition: rSub.binaryPosition || lSub.binaryPosition,
+          binaryDepth: rSub.binaryDepth ?? lSub.binaryDepth,
+        };
+      } else if (lRank > rRank || lRenew > rRenew || lExp > rExp) {
+        needsUploadLocal = true;
+      }
+    }
+  }
+  for (const [k, lSub] of Object.entries(localSubs)) {
+    if (lSub && lSub.status !== 'NOT_ORDERED' && !remoteSubs[k]) {
+      needsUploadLocal = true;
+    }
+  }
+
+  // 2. Reconcile unlockedPacks
+  const activeSubPacks = Object.entries(mergedSubs)
+    .filter(([, s]) => s && (s.status === 'TRIAL_ACTIVE' || s.status === 'ACTIVE_RENEWED'))
+    .map(([k]) => k);
+  const serverPacks = Array.isArray(remote.unlockedPacks) ? remote.unlockedPacks : null;
+  let finalPacks: string[];
+  if (serverIsNewer && serverPacks && serverPacks.length > 0) {
+    finalPacks = Array.from(new Set(['CONTACT', 'EVENT', ...serverPacks, ...activeSubPacks]));
+  } else {
+    finalPacks = Array.from(new Set(['CONTACT', 'EVENT', ...(serverPacks || []), ...localPacks, ...activeSubPacks]));
+    if (!serverPacks || finalPacks.some((p) => !serverPacks.includes(p))) {
+      if (localPacks.some((p) => p !== 'CONTACT' && p !== 'EVENT') || activeSubPacks.length > 0) {
+        needsUploadLocal = true;
+      }
+    }
+  }
+
+  // 3. Reconcile profession
+  let finalProfession: string | null = localProf;
+  if (serverIsNewer && remote.profession !== undefined) {
+    finalProfession = remote.profession ? String(remote.profession).trim().toUpperCase() : null;
+  } else if (remote.profession && !localProf) {
+    finalProfession = String(remote.profession).trim().toUpperCase();
+  } else if (localProf && !remote.profession) {
+    needsUploadLocal = true;
+  }
+
+  // 4. Reconcile customModules
+  const remoteCustoms = Array.isArray(remote.customModules)
+    ? (remote.customModules as CustomMemberModuleDef[])
+    : null;
+  let finalCustoms: CustomMemberModuleDef[];
+  if (serverIsNewer && remoteCustoms) {
+    finalCustoms = remoteCustoms;
+  } else {
+    const customMap = new Map<string, CustomMemberModuleDef>();
+    for (const m of localCustoms) {
+      if (m?.baseKey) customMap.set(m.baseKey, m);
+    }
+    for (const m of remoteCustoms || []) {
+      if (m?.baseKey) customMap.set(m.baseKey, m);
+    }
+    finalCustoms = Array.from(customMap.values());
+    if (localCustoms.length > (remoteCustoms?.length || 0)) {
+      needsUploadLocal = true;
+    }
+  }
+
+  // 5. Reconcile orderReceipts
+  const remoteReceipts = Array.isArray(remote.orderReceipts)
+    ? (remote.orderReceipts as SoftwareOrderReceipt[])
+    : [];
+  const receiptMap = new Map<string, SoftwareOrderReceipt>();
+  for (const r of [...remoteReceipts, ...localReceipts]) {
+    if (r?.orderId) receiptMap.set(r.orderId, r);
+  }
+  const finalReceipts = Array.from(receiptMap.values())
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 50);
+  if (localReceipts.length > remoteReceipts.length) {
+    needsUploadLocal = true;
+  }
+
+  if (!serverHasMeta && (finalPacks.length > 2 || Object.keys(mergedSubs).length > 0 || finalProfession || finalCustoms.length > 0)) {
+    needsUploadLocal = true;
+  }
+
+  // Write merged state locally without echoing back a push
+  applyingRemoteWorkspaceSyncDepth++;
+  try {
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}UNLOCKED_V2_${normMid}`, JSON.stringify(finalPacks));
+      if (Object.keys(mergedSubs).length > 0) {
+        localStorage.setItem(`${SUB_PREFIX}${normMid}`, JSON.stringify(mergedSubs));
+      }
+      if (finalProfession) {
+        localStorage.setItem(`${PROFESSION_KEY_PREFIX}${normMid}`, finalProfession);
+      } else if (serverIsNewer && remote.profession === null) {
+        localStorage.removeItem(`${PROFESSION_KEY_PREFIX}${normMid}`);
+      }
+      localStorage.setItem(`${CUSTOM_MODULES_PREFIX}${normMid}`, JSON.stringify(finalCustoms));
+      if (finalReceipts.length > 0) {
+        localStorage.setItem(`${RECEIPT_PREFIX}${normMid}`, JSON.stringify(finalReceipts));
+      }
+      if (remoteTs && serverIsNewer) {
+        setLocalWorkspaceMetaTs(normMid, remoteTs);
+      }
+    } catch {
+      // ignore localStorage quota errors
+    }
+  } finally {
+    applyingRemoteWorkspaceSyncDepth--;
+  }
+
+  dispatchWorkspaceMetaUpdated(normMid);
+
+  return {
+    unlockedPacks: finalPacks,
+    customModules: finalCustoms,
+    profession: finalProfession,
+    needsUploadLocal,
+  };
+}
+
 
 

@@ -76,7 +76,11 @@ import {
 import {
   getMemberModuleSubscriptions,
   saveMemberModuleSubscriptions,
+  MEMBER_WORKSPACE_META_UPDATED_EVENT,
+  applyRemoteMemberWorkspaceMeta,
+  pushMemberWorkspaceMetaNow,
 } from '../services/memberFiveStarConfig';
+import { apiFetchMemberWorkspace } from '../services/confidentialApiClient';
 import {
   CLOUD_VAULT_UPDATED_EVENT,
   ensureMemberCloudWorkspace,
@@ -216,8 +220,67 @@ export const MemberPortalView: React.FC<MemberPortalViewProps> = ({
         setCloudTick((t) => t + 1);
       }
     };
+    const handleMetaUpdated = (ev: Event) => {
+      const customEv = ev as CustomEvent<{ memberMid?: string }>;
+      if (!customEv.detail?.memberMid || customEv.detail.memberMid.trim().toUpperCase() === currentMid.trim().toUpperCase()) {
+        setNodesRefreshTick((t) => t + 1);
+        setCloudTick((t) => t + 1);
+      }
+    };
     window.addEventListener(TODOS_UPDATED_EVENT, handleTodosUpdated);
-    return () => window.removeEventListener(TODOS_UPDATED_EVENT, handleTodosUpdated);
+    window.addEventListener(MEMBER_WORKSPACE_META_UPDATED_EVENT, handleMetaUpdated);
+    return () => {
+      window.removeEventListener(TODOS_UPDATED_EVENT, handleTodosUpdated);
+      window.removeEventListener(MEMBER_WORKSPACE_META_UPDATED_EVENT, handleMetaUpdated);
+    };
+  }, [currentMid]);
+
+  useEffect(() => {
+    if (!currentMid) return;
+    let cancelled = false;
+    let lastPull = 0;
+    const pullMeta = async () => {
+      const now = Date.now();
+      if (now - lastPull < 2500) return;
+      lastPull = now;
+      const res = await apiFetchMemberWorkspace(currentMid);
+      if (cancelled || !res.ok) return;
+      if (res.bootstrap) {
+        erpEngine.hydrateFromServer(res.bootstrap);
+      }
+      const result = applyRemoteMemberWorkspaceMeta(currentMid, {
+        unlockedPacks: res.unlockedPacks,
+        subscriptions: res.subscriptions,
+        profession: res.profession,
+        customModules: res.customModules,
+        orderReceipts: res.orderReceipts,
+        metaUpdatedAt: res.metaUpdatedAt,
+      });
+      if (result.needsUploadLocal) {
+        void pushMemberWorkspaceMetaNow(currentMid);
+      }
+      setNodesRefreshTick((t) => t + 1);
+      setCloudTick((t) => t + 1);
+    };
+    void pullMeta();
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void pullMeta();
+      }
+    };
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void pullMeta();
+      }
+    }, 20000);
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+    };
   }, [currentMid]);
 
   const purchasedProductMap = React.useMemo(() => {

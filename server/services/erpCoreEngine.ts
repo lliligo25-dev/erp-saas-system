@@ -122,9 +122,19 @@ export class ERPEngine {
   // 4. 第 3 種 AI 系統：個人預約系統
   private bookingProfiles: Map<string, BookingProfile> = new Map();
   private bookingAppointments: Map<string, BookingAppointment> = new Map();
-  // 5. 會員全能五星工作區跨裝置雲端同步資料（解鎖模組 + 各模組建檔紀錄與照片）
+  // 5. 會員全能五星工作區跨裝置雲端同步資料（解鎖模組 + 訂閱授權/職業/自訂模組/收據 + 各模組建檔紀錄與照片）
   private memberWorkspacePacks: Map<string, string[]> = new Map();
   private memberWorkspaceRecords: Map<string, Record<string, Array<Record<string, any>>>> = new Map();
+  private memberWorkspaceMeta: Map<
+    string,
+    {
+      subscriptions?: Record<string, Record<string, any>>;
+      profession?: string | null;
+      customModules?: Array<Record<string, any>>;
+      orderReceipts?: Array<Record<string, any>>;
+      updatedAt: string;
+    }
+  > = new Map();
 
   private currentMonolineCounter: number = 68; // A-00001~A-00063 公司自營不得轉讓；A-00064~A-00068 永吉家族已建檔
   private currentBinaryCounter: number = 25000068; // C-25000001~C-25000063 公司自營；C-25000064~C-25000068 永吉家族
@@ -214,6 +224,9 @@ export class ERPEngine {
           }
           if (parsed.memberWorkspaceRecords && Array.isArray(parsed.memberWorkspaceRecords)) {
             this.memberWorkspaceRecords = new Map(parsed.memberWorkspaceRecords);
+          }
+          if (parsed.memberWorkspaceMeta && Array.isArray(parsed.memberWorkspaceMeta)) {
+            this.memberWorkspaceMeta = new Map(parsed.memberWorkspaceMeta);
           }
 
           let mutated = this.purgeLegacyVirtualDemoData();
@@ -1066,6 +1079,7 @@ export class ERPEngine {
         hqDbAuditLogs: this.hqDbAuditLogs.slice(0, 200),
         memberWorkspacePacks: Array.from(this.memberWorkspacePacks.entries()),
         memberWorkspaceRecords: Array.from(this.memberWorkspaceRecords.entries()),
+        memberWorkspaceMeta: Array.from(this.memberWorkspaceMeta.entries()),
       };
       if (!fs.existsSync(SERVER_DATA_DIR)) {
         fs.mkdirSync(SERVER_DATA_DIR, { recursive: true });
@@ -3961,7 +3975,126 @@ export class ERPEngine {
             .map((p: any) => String(p || '').trim().toUpperCase())
             .filter(Boolean);
           if (cleanPacks.length > 0) {
-            this.memberWorkspacePacks.set(mid, Array.from(new Set(cleanPacks)));
+            const existingPacks = this.memberWorkspacePacks.get(mid) || [];
+            this.memberWorkspacePacks.set(mid, Array.from(new Set([...existingPacks, ...cleanPacks])));
+          }
+          continue;
+        }
+        if (sysType === '_WORKSPACE_META' && entry?.record && typeof entry.record === 'object') {
+          const rec = entry.record as Record<string, any>;
+          const existingMeta = this.memberWorkspaceMeta.get(mid);
+          const mergedSubs: Record<string, Record<string, any>> = {
+            ...(existingMeta?.subscriptions || {}),
+          };
+          if (rec.subscriptions && typeof rec.subscriptions === 'object' && !Array.isArray(rec.subscriptions)) {
+            for (const [k, v] of Object.entries(rec.subscriptions as Record<string, any>)) {
+              if (!v || typeof v !== 'object') continue;
+              const modKey = String(k).trim().toUpperCase();
+              const prev = mergedSubs[modKey];
+              if (!prev) {
+                mergedSubs[modKey] = v;
+              } else {
+                const rank = (st?: string) =>
+                  st === 'ACTIVE_RENEWED' ? 3 : st === 'TRIAL_ACTIVE' ? 2 : st === 'EXPIRED_FROZEN' ? 1 : 0;
+                const prevRank = rank(prev.status);
+                const nextRank = rank(v.status);
+                const prevExp = prev.expiresAt ? new Date(prev.expiresAt).getTime() : 0;
+                const nextExp = v.expiresAt ? new Date(v.expiresAt).getTime() : 0;
+                if (nextRank > prevRank || (nextRank === prevRank && nextExp >= prevExp)) {
+                  mergedSubs[modKey] = { ...prev, ...v };
+                }
+              }
+            }
+          }
+
+          const remoteUpdatedAt = typeof rec.updatedAt === 'string' && rec.updatedAt ? rec.updatedAt : new Date().toISOString();
+          const remoteNewer =
+            !existingMeta?.updatedAt ||
+            new Date(remoteUpdatedAt).getTime() >= new Date(existingMeta.updatedAt).getTime();
+
+          const nextProfession =
+            remoteNewer && rec.profession !== undefined
+              ? (typeof rec.profession === 'string' && rec.profession.trim() ? rec.profession.trim().toUpperCase() : null)
+              : existingMeta?.profession ?? null;
+
+          const nextCustomModules =
+            remoteNewer && Array.isArray(rec.customModules)
+              ? rec.customModules
+              : existingMeta?.customModules || (Array.isArray(rec.customModules) ? rec.customModules : []);
+
+          const receiptMap = new Map<string, Record<string, any>>();
+          for (const r of [...(Array.isArray(rec.orderReceipts) ? rec.orderReceipts : []), ...(existingMeta?.orderReceipts || [])]) {
+            if (r && typeof r === 'object' && r.orderId) {
+              receiptMap.set(String(r.orderId), r);
+            }
+          }
+          const nextReceipts = Array.from(receiptMap.values())
+            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+            .slice(0, 50);
+
+          this.memberWorkspaceMeta.set(mid, {
+            subscriptions: mergedSubs,
+            profession: nextProfession,
+            customModules: nextCustomModules,
+            orderReceipts: nextReceipts,
+            updatedAt: remoteNewer ? remoteUpdatedAt : existingMeta!.updatedAt,
+          });
+
+          // Reconcile unlockedPacks: preserve remote unlockedPacks + every active subscribed module
+          const activeSubPacks = Object.entries(mergedSubs)
+            .filter(([, s]) => s && (s.status === 'TRIAL_ACTIVE' || s.status === 'ACTIVE_RENEWED'))
+            .map(([k]) => k);
+          const remotePacks = Array.isArray(rec.unlockedPacks)
+            ? rec.unlockedPacks.map((p: any) => String(p || '').trim().toUpperCase()).filter(Boolean)
+            : [];
+          const existingPacks = this.memberWorkspacePacks.get(mid) || [];
+          const basePacks = remoteNewer && remotePacks.length > 0 ? remotePacks : [...existingPacks, ...remotePacks];
+          const reconciled = Array.from(new Set(['CONTACT', 'EVENT', ...basePacks, ...activeSubPacks]));
+          this.memberWorkspacePacks.set(mid, reconciled);
+
+          // Backfill binary node softwareKey/softwareTitle after cold start
+          for (const [modKey, sub] of Object.entries(mergedSubs)) {
+            const bId = sub?.binaryNodeId ? String(sub.binaryNodeId).trim().toUpperCase() : '';
+            if (bId && this.binaryNodes.has(bId)) {
+              const node = this.binaryNodes.get(bId)!;
+              node.softwareKey = modKey;
+              if (sub.expiresAt && !node.hqPermanentLocked) {
+                node.trialExpiresAt = String(sub.expiresAt);
+              }
+            }
+          }
+          continue;
+        }
+        if (sysType === '_BOOKING_PROFILE' && entry?.record && typeof entry.record === 'object') {
+          const bp = entry.record as Record<string, any>;
+          if (bp.licenseId) {
+            const existingBp = this.bookingProfiles.get(mid);
+            const restored: BookingProfile = {
+              licenseId: String(bp.licenseId),
+              ownerMid: mid,
+              ownerName: String(bp.ownerName || existingBp?.ownerName || this.members.get(mid)?.name || mid),
+              displayTitle: String(bp.displayTitle || existingBp?.displayTitle || `${this.members.get(mid)?.name || mid} 專屬 AI 個人預約中心`),
+              bio: String(bp.bio || existingBp?.bio || ''),
+              status:
+                bp.status === 'ACTIVE_RENEWED' || bp.status === 'TRIAL_ACTIVE' || bp.status === 'EXPIRED_FROZEN'
+                  ? bp.status
+                  : 'TRIAL_ACTIVE',
+              activatedAt: String(bp.activatedAt || existingBp?.activatedAt || new Date().toISOString()),
+              expiresAt: String(bp.expiresAt || existingBp?.expiresAt || new Date(Date.now() + 30 * 86400000).toISOString()),
+              monthlyRentNtd: Number(bp.monthlyRentNtd || 100),
+              totalRenewalsCount: Number(bp.totalRenewalsCount || 0),
+              workingDays: Array.isArray(bp.workingDays) ? bp.workingDays.map(Number) : existingBp?.workingDays || [1, 2, 3, 4, 5, 6],
+              startHour: Number(bp.startHour ?? existingBp?.startHour ?? 9),
+              endHour: Number(bp.endHour ?? existingBp?.endHour ?? 20),
+              slotIntervalMinutes: Number(bp.slotIntervalMinutes ?? existingBp?.slotIntervalMinutes ?? 60),
+              services: Array.isArray(bp.services) ? bp.services : existingBp?.services || [],
+              binaryNodeId: bp.binaryNodeId ? String(bp.binaryNodeId).trim().toUpperCase() : existingBp?.binaryNodeId,
+            };
+            this.bookingProfiles.set(mid, restored);
+            const currentPacks = this.memberWorkspacePacks.get(mid) || ['CONTACT', 'EVENT'];
+            if (!currentPacks.includes('BOOKING')) {
+              this.memberWorkspacePacks.set(mid, [...currentPacks, 'BOOKING']);
+            }
           }
           continue;
         }
@@ -4476,13 +4609,35 @@ export class ERPEngine {
   public getMemberWorkspaceData(mid: string): {
     unlockedPacks: string[] | null;
     recordsBySys: Record<string, Array<Record<string, any>>>;
+    subscriptions: Record<string, Record<string, any>> | null;
+    profession: string | null | undefined;
+    customModules: Array<Record<string, any>> | null;
+    orderReceipts: Array<Record<string, any>> | null;
+    metaUpdatedAt: string | null;
   } {
     const keyMid = String(mid || '').trim().toUpperCase();
     const packs = this.memberWorkspacePacks.get(keyMid) || null;
     const recordsBySys = this.memberWorkspaceRecords.get(keyMid) || {};
+    const meta = this.memberWorkspaceMeta.get(keyMid);
+
+    // Ensure BOOKING pack is reflected if server has an active BookingProfile
+    let resolvedPacks = packs ? [...packs] : null;
+    if (this.bookingProfiles.has(keyMid)) {
+      if (!resolvedPacks) {
+        resolvedPacks = ['CONTACT', 'EVENT', 'BOOKING'];
+      } else if (!resolvedPacks.includes('BOOKING')) {
+        resolvedPacks.push('BOOKING');
+      }
+    }
+
     return {
-      unlockedPacks: packs ? [...packs] : null,
+      unlockedPacks: resolvedPacks,
       recordsBySys,
+      subscriptions: meta?.subscriptions ? { ...meta.subscriptions } : null,
+      profession: meta ? (meta.profession ?? null) : undefined,
+      customModules: meta?.customModules ? [...meta.customModules] : null,
+      orderReceipts: meta?.orderReceipts ? [...meta.orderReceipts] : null,
+      metaUpdatedAt: meta?.updatedAt || null,
     };
   }
 
@@ -4498,8 +4653,126 @@ export class ERPEngine {
     if (!clean.includes('CONTACT')) clean.unshift('CONTACT');
     if (!clean.includes('EVENT')) clean.push('EVENT');
     this.memberWorkspacePacks.set(keyMid, clean);
+    const existingMeta = this.memberWorkspaceMeta.get(keyMid);
+    this.memberWorkspaceMeta.set(keyMid, {
+      ...(existingMeta || {}),
+      updatedAt: new Date().toISOString(),
+    });
     this.saveState();
     return clean;
+  }
+
+  public saveMemberWorkspaceMeta(
+    mid: string,
+    input: {
+      unlockedPacks?: string[];
+      subscriptions?: Record<string, Record<string, any>>;
+      profession?: string | null;
+      customModules?: Array<Record<string, any>>;
+      orderReceipts?: Array<Record<string, any>>;
+      updatedAt?: string;
+    }
+  ): {
+    unlockedPacks: string[];
+    subscriptions: Record<string, Record<string, any>>;
+    profession: string | null;
+    customModules: Array<Record<string, any>>;
+    orderReceipts: Array<Record<string, any>>;
+    updatedAt: string;
+  } {
+    const keyMid = String(mid || '').trim().toUpperCase();
+    const existingMeta = this.memberWorkspaceMeta.get(keyMid);
+    const nowIso = new Date().toISOString();
+
+    // Merge subscriptions monotonically so an activated/renewed module is never downgraded
+    const mergedSubs: Record<string, Record<string, any>> = {
+      ...(existingMeta?.subscriptions || {}),
+    };
+    if (input.subscriptions && typeof input.subscriptions === 'object') {
+      const rank = (st?: string) =>
+        st === 'ACTIVE_RENEWED' ? 3 : st === 'TRIAL_ACTIVE' ? 2 : st === 'EXPIRED_FROZEN' ? 1 : 0;
+      for (const [rawK, nextSub] of Object.entries(input.subscriptions)) {
+        if (!nextSub || typeof nextSub !== 'object') continue;
+        const k = String(rawK).trim().toUpperCase();
+        const prev = mergedSubs[k];
+        if (!prev) {
+          mergedSubs[k] = { ...nextSub, moduleKey: k };
+        } else {
+          const prevRank = rank(prev.status);
+          const nextRank = rank(nextSub.status);
+          const prevExp = prev.expiresAt ? new Date(prev.expiresAt).getTime() : 0;
+          const nextExp = nextSub.expiresAt ? new Date(nextSub.expiresAt).getTime() : 0;
+          const prevRenew = Number(prev.totalRenewalsCount || 0);
+          const nextRenew = Number(nextSub.totalRenewalsCount || 0);
+          // Allow explicit expiry simulation or stronger/newer subscription state
+          if (
+            nextRank > prevRank ||
+            nextRenew > prevRenew ||
+            (nextRank === prevRank && nextExp >= prevExp) ||
+            (nextSub.status === 'EXPIRED_FROZEN' && nextExp > 0 && nextExp < Date.now())
+          ) {
+            mergedSubs[k] = {
+              ...prev,
+              ...nextSub,
+              moduleKey: k,
+              binaryNodeId: nextSub.binaryNodeId || prev.binaryNodeId,
+              binaryParentId: nextSub.binaryParentId || prev.binaryParentId,
+              binaryPosition: nextSub.binaryPosition || prev.binaryPosition,
+              binaryDepth: nextSub.binaryDepth ?? prev.binaryDepth,
+            };
+          }
+        }
+      }
+    }
+
+    const basePacks = Array.isArray(input.unlockedPacks)
+      ? input.unlockedPacks.map((p) => String(p || '').trim().toUpperCase()).filter(Boolean)
+      : this.memberWorkspacePacks.get(keyMid) || ['CONTACT', 'EVENT'];
+
+    const activeSubPacks = Object.entries(mergedSubs)
+      .filter(([, s]) => s && (s.status === 'TRIAL_ACTIVE' || s.status === 'ACTIVE_RENEWED'))
+      .map(([k]) => k);
+    const savedPacks = Array.from(new Set(['CONTACT', 'EVENT', ...basePacks, ...activeSubPacks]));
+    this.memberWorkspacePacks.set(keyMid, savedPacks);
+
+    const nextProfession =
+      input.profession !== undefined
+        ? input.profession
+          ? String(input.profession).trim().toUpperCase()
+          : null
+        : existingMeta?.profession ?? null;
+
+    const nextCustomModules = Array.isArray(input.customModules)
+      ? input.customModules.slice(0, 30)
+      : existingMeta?.customModules || [];
+
+    const receiptMap = new Map<string, Record<string, any>>();
+    for (const r of [
+      ...(Array.isArray(input.orderReceipts) ? input.orderReceipts : []),
+      ...(existingMeta?.orderReceipts || []),
+    ]) {
+      if (r && typeof r === 'object' && r.orderId) {
+        receiptMap.set(String(r.orderId), r);
+      }
+    }
+    const nextReceipts = Array.from(receiptMap.values())
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 50);
+
+    const savedMeta = {
+      subscriptions: mergedSubs,
+      profession: nextProfession,
+      customModules: nextCustomModules,
+      orderReceipts: nextReceipts,
+      updatedAt: nowIso,
+    };
+    this.memberWorkspaceMeta.set(keyMid, savedMeta);
+    this.saveState();
+
+    return {
+      unlockedPacks: savedPacks,
+      ...savedMeta,
+    };
   }
 
   public upsertMemberWorkspaceRecord(

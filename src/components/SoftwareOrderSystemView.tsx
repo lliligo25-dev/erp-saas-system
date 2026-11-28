@@ -20,6 +20,7 @@ import {
   appendMemberOrderReceipt,
   loadMemberDynamicRecords,
   saveMemberDynamicRecords,
+  MEMBER_WORKSPACE_META_UPDATED_EVENT,
 } from '../services/memberFiveStarConfig';
 import { notifyNodesUpdated } from '../services/softwareNodeSync';
 import { syncMemberTodosToGas, notifyTodosUpdated } from '../services/gasTodoSyncService';
@@ -128,9 +129,19 @@ export const SoftwareOrderSystemView: React.FC<SoftwareOrderSystemViewProps> = (
 
   useEffect(() => {
     const onCloudUpdated = () => forceRefresh();
+    const onMetaUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ memberMid?: string }>).detail;
+      if (!detail?.memberMid || detail.memberMid.trim().toUpperCase() === effectiveMid.trim().toUpperCase()) {
+        forceRefresh();
+      }
+    };
     window.addEventListener(CLOUD_VAULT_UPDATED_EVENT, onCloudUpdated);
-    return () => window.removeEventListener(CLOUD_VAULT_UPDATED_EVENT, onCloudUpdated);
-  }, []);
+    window.addEventListener(MEMBER_WORKSPACE_META_UPDATED_EVENT, onMetaUpdated);
+    return () => {
+      window.removeEventListener(CLOUD_VAULT_UPDATED_EVENT, onCloudUpdated);
+      window.removeEventListener(MEMBER_WORKSPACE_META_UPDATED_EVENT, onMetaUpdated);
+    };
+  }, [effectiveMid]);
 
   const [cartKeys, setCartKeys] = useState<string[]>([]);
   const [activeReceiptModal, setActiveReceiptModal] = useState<SoftwareOrderReceipt | null>(null);

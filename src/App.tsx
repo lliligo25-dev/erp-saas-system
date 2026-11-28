@@ -24,6 +24,7 @@ import { MemberPortalView } from './components/MemberPortalView';
 import { BookingSystemView } from './components/BookingSystemView';
 import { MemberFiveStarWorkspace } from './components/MemberFiveStarWorkspace';
 import { SoftwareOrderSystemView } from './components/SoftwareOrderSystemView';
+import { BreakfastShopSystemView } from './components/BreakfastShopSystemView';
 import { ViewportToolbar, ViewportMode } from './components/ViewportToolbar';
 import {
   PublicShareDeployModal,
@@ -134,6 +135,9 @@ export default function App() {
   const [lockedIdentifier, setLockedIdentifier] = useState<string | null>(initialPortalInfo.targetId);
   const [showPublicJoin, setShowPublicJoin] = useState<boolean>(initialPortalInfo.isPublicJoin);
   const [publicJoinSponsorMid] = useState<string | null>(initialPortalInfo.sponsorMid);
+  const [showBreakfastPortal, setShowBreakfastPortal] = useState<boolean>(
+    initialPortalInfo.isBreakfastPortal
+  );
 
   const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [splashReady, setSplashReady] = useState<boolean>(false);
@@ -476,6 +480,59 @@ export default function App() {
     );
   }
 
+  // Standalone Independent Breakfast Shop System (?portal=breakfast) — completely separated from StorePortalView
+  if (showBreakfastPortal) {
+    const isMobilePreview = viewportMode === 'mobile';
+    const breakfastContent = (
+      <>
+        <LineInAppBanner />
+        <BreakfastShopSystemView
+          initialShopName={initialPortalInfo.breakfastShop}
+          initialTableLabel={initialPortalInfo.breakfastTable}
+          initialTab={initialPortalInfo.breakfastTab}
+          onExitToMain={() => setShowBreakfastPortal(false)}
+          exitLabel={session ? '返回管理工作台' : '返回統一登入中心'}
+        />
+      </>
+    );
+
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+        <ViewportToolbar
+          mode={viewportMode}
+          isNativeFullscreen={isNativeFullscreen}
+          onSelectMode={handleSelectViewportMode}
+          fontPrefs={fontPrefs}
+          onChangeFontPrefs={handleChangeFontPrefs}
+          onOpenShareModal={() => setShareDeployModal({ open: true, tab: 'share' })}
+          onOpenDeployModal={() => setShareDeployModal({ open: true, tab: 'deploy' })}
+        />
+        {isMobilePreview ? (
+          <MobileDeviceShell
+            preset={mobilePreset}
+            onChangePreset={setMobilePreset}
+            onExitMobileMode={() => handleSelectViewportMode('desktop')}
+            scrollContent={breakfastContent}
+          />
+        ) : (
+          <div className="flex-1 bg-slate-950 overflow-x-auto">
+            <div data-viewport={viewportMode} className={getViewportWrapperClass()}>
+              {breakfastContent}
+            </div>
+          </div>
+        )}
+        <PublicShareDeployModal
+          isOpen={shareDeployModal.open}
+          initialTab={shareDeployModal.tab}
+          onClose={() => setShareDeployModal((prev) => ({ ...prev, open: false }))}
+          sessionRole={session?.role || null}
+          sessionUserId={session?.userId || null}
+          lockedPortalRole={lockedPortalRole}
+        />
+      </div>
+    );
+  }
+
   // Show Public Unauthenticated Join Form or Role Login Gateway if unauthenticated
   if (!session) {
     const isMobilePreview = viewportMode === 'mobile';
@@ -520,6 +577,9 @@ export default function App() {
             initialIdentifier={lockedIdentifier}
             onOpenPublicJoin={
               lockedPortalRole === 'HQ_STAFF' ? undefined : () => setShowPublicJoin(true)
+            }
+            onOpenBreakfastSystem={
+              lockedPortalRole ? undefined : () => setShowBreakfastPortal(true)
             }
           />
         )}
@@ -667,6 +727,13 @@ export default function App() {
               {st.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setShowBreakfastPortal(true)}
+            className="px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer whitespace-nowrap bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/40"
+          >
+            開啟獨立專屬早餐店系統 (500元 · 1×5)
+          </button>
         </div>
       );
     }
@@ -924,6 +991,7 @@ export default function App() {
                 onNodesChanged={refreshStats}
                 onNavigateToPortal={() => setCurrentTab('member_portal')}
                 onNavigateToBooking={() => setCurrentTab('booking_system')}
+                onOpenBreakfastSystem={() => setShowBreakfastPortal(true)}
                 onNavigateToRegisterWithClient={(client) => {
                   setPrefillRegClient(client);
                   setCurrentTab('registration');

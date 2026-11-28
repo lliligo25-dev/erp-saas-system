@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * 產銷合一物流直銷單軌轉雙軌 SaaS ERP 系統 (Google Apps Script 後端 - Code.gs)
- * 版本：AI 專用修訂版 3.0 (正式上線潔淨版 · HD 高畫質照片 · 10大模組表單同步)
+ * 版本：AI 專用修訂版 3.1 (正式上線潔淨版 · 跨裝置已開通系統即時同步 · 關機喚醒零遺失)
  * ============================================================================
  * 
  * 核心規範依據：
@@ -3346,7 +3346,7 @@ function upsertWorkspaceRecordInSheet(data) {
     }
   }
   metaRec.ID = recId;
-  var jsonStr = JSON.stringify(metaRec).slice(0, 45000);
+  var jsonStr = JSON.stringify(metaRec).slice(0, 48000);
 
   var lastRow = sh.getLastRow();
   var targetRow = -1;

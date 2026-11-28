@@ -545,6 +545,11 @@ export interface MemberWorkspaceCloudPayload {
   mid?: string;
   unlockedPacks?: string[] | null;
   recordsBySys?: Record<string, Array<Record<string, any>>>;
+  subscriptions?: Record<string, Record<string, any>> | null;
+  profession?: string | null;
+  customModules?: Array<Record<string, any>> | null;
+  orderReceipts?: Array<Record<string, any>> | null;
+  metaUpdatedAt?: string | null;
   bootstrap?: ScopedBootstrapPayload;
   syncedAt?: string;
   error?: string;
@@ -589,7 +594,7 @@ export async function apiSaveMemberWorkspaceRecord(
 export async function apiSaveMemberWorkspacePacks(
   mid: string,
   packs: string[]
-): Promise<{ ok: boolean; unlockedPacks?: string[]; error?: string }> {
+): Promise<{ ok: boolean; unlockedPacks?: string[]; metaUpdatedAt?: string; error?: string }> {
   try {
     const res = await fetch(`/api/member/workspace/${encodeURIComponent(mid)}/packs`, {
       method: 'POST',
@@ -603,6 +608,44 @@ export async function apiSaveMemberWorkspacePacks(
     return await res.json();
   } catch {
     return { ok: false, error: '雲端同步模組設定失敗' };
+  }
+}
+
+export interface SaveMemberWorkspaceMetaInput {
+  unlockedPacks?: string[];
+  subscriptions?: Record<string, Record<string, any>>;
+  profession?: string | null;
+  customModules?: Array<Record<string, any>>;
+  orderReceipts?: Array<Record<string, any>>;
+}
+
+export async function apiSaveMemberWorkspaceMeta(
+  mid: string,
+  payload: SaveMemberWorkspaceMetaInput
+): Promise<{
+  ok: boolean;
+  unlockedPacks?: string[];
+  subscriptions?: Record<string, Record<string, any>>;
+  profession?: string | null;
+  customModules?: Array<Record<string, any>>;
+  orderReceipts?: Array<Record<string, any>>;
+  metaUpdatedAt?: string;
+  gasSynced?: boolean;
+  error?: string;
+}> {
+  try {
+    const res = await fetch(`/api/member/workspace/${encodeURIComponent(mid)}/meta`, {
+      method: 'POST',
+      headers: buildAuthHeaders({
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      }),
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    return await res.json();
+  } catch {
+    return { ok: false, error: '雲端同步已開通系統設定失敗' };
   }
 }
 

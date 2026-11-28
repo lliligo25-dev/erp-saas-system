@@ -32,6 +32,7 @@ import {
   Camera,
   QrCode,
   Sparkles,
+  UtensilsCrossed,
 } from 'lucide-react';
 
 interface RoleLoginPortalProps {
@@ -39,6 +40,7 @@ interface RoleLoginPortalProps {
   lockedRole?: UserRole | null;
   initialIdentifier?: string | null;
   onOpenPublicJoin?: () => void;
+  onOpenBreakfastSystem?: () => void;
 }
 
 interface RoleConfig {
@@ -111,6 +113,7 @@ export const RoleLoginPortal: React.FC<RoleLoginPortalProps> = ({
   lockedRole = null,
   initialIdentifier = null,
   onOpenPublicJoin,
+  onOpenBreakfastSystem,
 }) => {
   const initialRole: UserRole = lockedRole || 'MEMBER';
   const [selectedRole, setSelectedRole] = useState<UserRole>(initialRole);
@@ -442,6 +445,18 @@ export const RoleLoginPortal: React.FC<RoleLoginPortalProps> = ({
                     >
                       <Sparkles className="w-4 h-4 text-sky-400" />
                       <span>還沒有帳號？免登入免費開通 AI 軟體 1+1（30 天體驗）</span>
+                    </button>
+                  )}
+
+                  {!isHqPortal && !lockedRole && onOpenBreakfastSystem && (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={onOpenBreakfastSystem}
+                      className="w-full py-2.5 px-4 bg-amber-950/35 hover:bg-amber-900/45 border border-amber-500/40 text-amber-200 font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <UtensilsCrossed className="w-4 h-4 text-amber-400" />
+                      <span>進入獨立「專屬早餐店系統」（月租 500 元 · 每代 1×5 分紅）</span>
                     </button>
                   )}
                 </div>

@@ -95,6 +95,154 @@ const ALLOWED_WORKSPACE_PACKS = new Set([
   'TCM',
 ]);
 
+const ALLOWED_PROFESSION_KEYS = new Set([
+  'TCM_THERAPIST',
+  'BREAKFAST_OWNER',
+  'NAIL_BEAUTY',
+  'FRUIT_SHOP',
+  'ECOMMERCE_SELLER',
+  'ATOMY_LEADER',
+  'ASSOC_OFFICER',
+  'ELDER_CARE',
+]);
+
+const ALLOWED_SUB_STATUS = new Set([
+  'NOT_ORDERED',
+  'TRIAL_ACTIVE',
+  'ACTIVE_RENEWED',
+  'EXPIRED_FROZEN',
+]);
+
+function sanitizeWorkspaceSubscriptions(raw: unknown): Record<string, Record<string, any>> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, Record<string, any>> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!k || k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    const modKey = k.trim().toUpperCase();
+    if (!ALLOWED_WORKSPACE_PACKS.has(modKey)) continue;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const obj = v as Record<string, unknown>;
+    const statusRaw = typeof obj.status === 'string' ? obj.status.trim().toUpperCase() : 'NOT_ORDERED';
+    const status = ALLOWED_SUB_STATUS.has(statusRaw) ? statusRaw : 'NOT_ORDERED';
+    const cleanSub: Record<string, any> = {
+      moduleKey: modKey,
+      licenseCode: sanitizePublicText(obj.licenseCode, 60) || `SW-${modKey}`,
+      status,
+      monthlyRentNtd: Math.max(0, Math.min(100000, Number(obj.monthlyRentNtd ?? 100) || 100)),
+      totalRenewalsCount: Math.max(0, Math.min(9999, Number(obj.totalRenewalsCount ?? 0) || 0)),
+    };
+    if (typeof obj.activatedAt === 'string' && obj.activatedAt.trim()) {
+      cleanSub.activatedAt = sanitizePublicText(obj.activatedAt, 40);
+    }
+    if (typeof obj.expiresAt === 'string' && obj.expiresAt.trim()) {
+      cleanSub.expiresAt = sanitizePublicText(obj.expiresAt, 40);
+    }
+    if (typeof obj.lastSettlementTxnId === 'string' && obj.lastSettlementTxnId.trim()) {
+      cleanSub.lastSettlementTxnId = sanitizePublicText(obj.lastSettlementTxnId, 60);
+    }
+    if (typeof obj.binaryNodeId === 'string' && obj.binaryNodeId.trim()) {
+      cleanSub.binaryNodeId = sanitizePublicText(obj.binaryNodeId, 32).toUpperCase();
+    }
+    if (typeof obj.binaryParentId === 'string' && obj.binaryParentId.trim()) {
+      cleanSub.binaryParentId = sanitizePublicText(obj.binaryParentId, 32).toUpperCase();
+    }
+    if (obj.binaryPosition === 'L' || obj.binaryPosition === 'R' || obj.binaryPosition === 'ROOT') {
+      cleanSub.binaryPosition = obj.binaryPosition;
+    }
+    if (typeof obj.binaryDepth === 'number' && Number.isFinite(obj.binaryDepth)) {
+      cleanSub.binaryDepth = Math.max(0, Math.min(100, Math.floor(obj.binaryDepth)));
+    }
+    if (Array.isArray(obj.extraBinaryNodeIds)) {
+      const extras = obj.extraBinaryNodeIds
+        .slice(0, 20)
+        .map((id) => sanitizePublicText(id, 32).toUpperCase())
+        .filter(Boolean);
+      if (extras.length > 0) cleanSub.extraBinaryNodeIds = extras;
+    }
+    out[modKey] = cleanSub;
+  }
+  return out;
+}
+
+function sanitizeWorkspaceCustomModules(raw: unknown): Array<Record<string, any>> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Array<Record<string, any>> = [];
+  const seen = new Set<string>();
+  for (const item of raw.slice(0, 30)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const obj = item as Record<string, unknown>;
+    const baseKey = sanitizePublicText(obj.baseKey, 32).toUpperCase();
+    if (!/^[A-Z0-9_]{3,32}$/.test(baseKey) || seen.has(baseKey)) continue;
+    const title = sanitizePublicText(obj.title, 40);
+    if (!title) continue;
+    seen.add(baseKey);
+    const cats = Array.isArray(obj.cats)
+      ? obj.cats
+          .slice(0, 15)
+          .map((c) => sanitizePublicText(c, 24))
+          .filter(Boolean)
+      : ['進行中', '待追蹤', '已完成'];
+    const iconColor = sanitizePublicText(obj.iconColor, 32);
+    const safeColor = /^text-[a-z]+-\d{3}$/.test(iconColor) ? iconColor : 'text-indigo-600';
+    out.push({
+      baseKey,
+      title,
+      cats: cats.length > 0 ? cats : ['進行中', '待追蹤', '已完成'],
+      nameFieldLabel: sanitizePublicText(obj.nameFieldLabel, 24) || '項目名稱',
+      iconColor: safeColor,
+      createdAt: sanitizePublicText(obj.createdAt, 40) || new Date().toISOString(),
+    });
+  }
+  return out;
+}
+
+function sanitizeWorkspaceOrderReceipts(raw: unknown): Array<Record<string, any>> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Array<Record<string, any>> = [];
+  const seen = new Set<string>();
+  for (const item of raw.slice(0, 35)) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const obj = item as Record<string, unknown>;
+    const orderId = sanitizePublicText(obj.orderId, 40);
+    if (!orderId || seen.has(orderId)) continue;
+    seen.add(orderId);
+    const items = Array.isArray(obj.items)
+      ? obj.items.slice(0, 15).map((it: any) => ({
+          moduleKey: sanitizePublicText(it?.moduleKey, 24).toUpperCase(),
+          title: sanitizePublicText(it?.title, 48),
+          codeLabel: sanitizePublicText(it?.codeLabel, 48),
+          action:
+            it?.action === 'PAID_RENEWAL' || it?.action === 'NEW_BINARY_SEAT'
+              ? it.action
+              : 'TRIAL_ACTIVATE',
+          amountNtd: Math.max(0, Math.min(1000000, Number(it?.amountNtd || 0) || 0)),
+          newExpiresAt: sanitizePublicText(it?.newExpiresAt, 40),
+          settlementTxnId: sanitizePublicText(it?.settlementTxnId, 48) || undefined,
+          binaryNodeId: sanitizePublicText(it?.binaryNodeId, 32).toUpperCase() || undefined,
+          binaryParentId: sanitizePublicText(it?.binaryParentId, 32).toUpperCase() || undefined,
+          binaryPosition:
+            it?.binaryPosition === 'L' || it?.binaryPosition === 'R' || it?.binaryPosition === 'ROOT'
+              ? it.binaryPosition
+              : undefined,
+          binaryDepth:
+            typeof it?.binaryDepth === 'number' && Number.isFinite(it.binaryDepth)
+              ? Math.max(0, Math.min(100, Math.floor(it.binaryDepth)))
+              : undefined,
+          isNewBinaryNode: Boolean(it?.isNewBinaryNode),
+        }))
+      : [];
+    out.push({
+      orderId,
+      memberMid: sanitizePublicText(obj.memberMid, 24).toUpperCase(),
+      items,
+      totalAmountNtd: Math.max(0, Math.min(10000000, Number(obj.totalAmountNtd || 0) || 0)),
+      settlementBreakdowns: [],
+      createdAt: sanitizePublicText(obj.createdAt, 40) || new Date().toISOString(),
+    });
+  }
+  return out;
+}
+
 function sanitizePhotoUrl(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   const trimmed = raw.trim();
@@ -147,7 +295,12 @@ function canAccessMemberWorkspace(session: AuthSession, targetMid: string): bool
   return false;
 }
 
+let activeHydrationPromise: Promise<GasHydrationStatus> | null = null;
+let lastHydrationSuccessAt = 0;
+let lastHydrationAttemptAt = 0;
+
 async function hydrateEngineFromGas(trigger: 'startup' | 'manual'): Promise<GasHydrationStatus> {
+  lastHydrationAttemptAt = Date.now();
   const fetched = await fetchGasHydrationState();
   const nowIso = new Date().toISOString();
   if (!fetched.ok || !fetched.data) {
@@ -169,6 +322,7 @@ async function hydrateEngineFromGas(trigger: 'startup' | 'manual'): Promise<GasH
   }
 
   const counts = serverErpEngine.hydrateFromGasExport(fetched.data);
+  lastHydrationSuccessAt = Date.now();
   const status: GasHydrationStatus = {
     ok: true,
     spreadsheetName: fetched.data.spreadsheetName,
@@ -179,6 +333,31 @@ async function hydrateEngineFromGas(trigger: 'startup' | 'manual'): Promise<GasH
   setGasHydrationStatus(status);
   console.log(`[GAS Hydration (${trigger})] ${status.message}`);
   return status;
+}
+
+function triggerSharedHydration(trigger: 'startup' | 'manual'): Promise<GasHydrationStatus> {
+  if (!activeHydrationPromise) {
+    activeHydrationPromise = hydrateEngineFromGas(trigger).finally(() => {
+      activeHydrationPromise = null;
+    });
+  }
+  return activeHydrationPromise;
+}
+
+/**
+ * 防止 Render 免費主機休眠喚醒（開機）瞬間，尚未從 Google Sheets 回讀完畢就回傳空白已開通清單
+ */
+async function ensureHydratedBeforeRead(maxWaitMs = 5500): Promise<void> {
+  if (lastHydrationSuccessAt > 0) return;
+  let promise = activeHydrationPromise;
+  if (!promise && Date.now() - lastHydrationAttemptAt > 20_000) {
+    promise = triggerSharedHydration('startup');
+  }
+  if (!promise) return;
+  await Promise.race([
+    promise,
+    new Promise<void>((resolve) => setTimeout(resolve, maxWaitMs)),
+  ]);
 }
 
 interface AuthedRequest extends Request {
@@ -361,7 +540,7 @@ async function startServer() {
   });
 
   // 1. Server-side Confidential Authentication
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const clientIp = req.ip || 'unknown';
     if (!checkLoginRateLimit(clientIp)) {
       res.status(429).json({ success: false, error: '嘗試登入次數過多，請稍後再試' });
@@ -396,6 +575,8 @@ async function startServer() {
       return;
     }
 
+    await ensureHydratedBeforeRead();
+
     const authResult = serverErpEngine.authenticateRole(role, identifier.trim(), passcode.trim());
     if (!authResult.success || !authResult.session) {
       res.status(401).json({
@@ -417,7 +598,7 @@ async function startServer() {
   });
 
   // 2. Restore Authenticated Session + Role-Scoped Data
-  app.get('/api/auth/session', (req, res) => {
+  app.get('/api/auth/session', async (req, res) => {
     const session = getRequestSession(req);
     if (!session) {
       res.json({ authenticated: false, session: null, bootstrap: null });
@@ -431,6 +612,8 @@ async function startServer() {
       res.json({ authenticated: false, session: null, bootstrap: null });
       return;
     }
+
+    await ensureHydratedBeforeRead();
 
     const bootstrap = serverErpEngine.getScopedBootstrap(session);
     res.json({
@@ -1030,6 +1213,16 @@ async function startServer() {
           amount: result.paidAmount || 100,
         });
       } else if (action === 'allocateBinaryNodeForSoftware' && result?.binaryNode) {
+        const swKey = sanitizePublicText(data.softwareKey || result.binaryNode.softwareKey, 24).toUpperCase();
+        if (ALLOWED_WORKSPACE_PACKS.has(swKey)) {
+          const curWs = serverErpEngine.getMemberWorkspaceData(result.binaryNode.mid);
+          const nextPacks = Array.from(new Set([...(curWs.unlockedPacks || ['CONTACT', 'EVENT']), swKey]));
+          serverErpEngine.saveMemberWorkspacePacks(result.binaryNode.mid, nextPacks);
+          void forwardErpEventToGas('saveMemberPacks', {
+            memberMid: result.binaryNode.mid,
+            packs: nextPacks,
+          });
+        }
         void forwardErpEventToGas('allocateSoftwareBinaryNode', {
           memberMid: result.binaryNode.mid,
           binaryNodeId: result.binaryNode.nodeId,
@@ -1042,6 +1235,48 @@ async function startServer() {
           softwareTitle: data.softwareTitle || result.binaryNode.softwareTitle || 'AI 雙軌模組',
           executeSettlement: Boolean(data.executeSettlement),
         });
+      } else if (
+        (action === 'activateBookingTrial' ||
+          action === 'renewBookingMonthlyFee' ||
+          action === 'updateBookingProfile' ||
+          action === 'addBookingService' ||
+          action === 'toggleBookingService' ||
+          action === 'deleteBookingService') &&
+        result
+      ) {
+        const bkProfile = action === 'renewBookingMonthlyFee' ? result.profile : result;
+        const bkOwnerMid = sanitizePublicText(
+          bkProfile?.ownerMid || (session.role === 'MEMBER' ? session.userId : data.ownerMid),
+          24
+        ).toUpperCase();
+        if (bkOwnerMid && bkProfile?.licenseId) {
+          const curWs = serverErpEngine.getMemberWorkspaceData(bkOwnerMid);
+          const nextPacks = Array.from(new Set([...(curWs.unlockedPacks || ['CONTACT', 'EVENT']), 'BOOKING']));
+          serverErpEngine.saveMemberWorkspacePacks(bkOwnerMid, nextPacks);
+          void forwardErpEventToGas('saveMemberPacks', {
+            memberMid: bkOwnerMid,
+            packs: nextPacks,
+          });
+          void forwardErpEventToGas('upsertWorkspaceRecord', {
+            memberMid: bkOwnerMid,
+            sysType: '_BOOKING_PROFILE',
+            record: { ID: 'PROFILE', ...bkProfile },
+          });
+        }
+        if (action === 'renewBookingMonthlyFee' && result?.binaryNode) {
+          void forwardErpEventToGas('allocateSoftwareBinaryNode', {
+            memberMid: result.binaryNode.mid,
+            binaryNodeId: result.binaryNode.nodeId,
+            parentId: result.binaryNode.parentId,
+            position: result.binaryNode.placementPosition,
+            depth: result.binaryNode.depth,
+            sponsorMid: result.binaryNode.sponsorMid,
+            status: result.binaryNode.status,
+            expiresAt: result.binaryNode.trialExpiresAt,
+            softwareTitle: '個人預約系統',
+            executeSettlement: true,
+          });
+        }
       } else if ((action === 'addContact' || action === 'updateContact') && result) {
         void forwardErpEventToGas('upsertCrmRecord', {
           sysType: 'CONTACT_M',
@@ -1072,13 +1307,14 @@ async function startServer() {
   });
 
   // 8. Member Five-Star Workspace Cross-Device Cloud Sync Routes (Phone <-> Server <-> Desktop + Google Sheets)
-  app.get('/api/member/workspace/:mid', requireAuth, (req: AuthedRequest, res) => {
+  app.get('/api/member/workspace/:mid', requireAuth, async (req: AuthedRequest, res) => {
     const session = req.erpSession!;
     const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
     if (!canAccessMemberWorkspace(session, targetMid)) {
       res.status(403).json({ ok: false, error: '權限不足：僅能讀取本人專屬工作區資料' });
       return;
     }
+    await ensureHydratedBeforeRead();
     const workspace = serverErpEngine.getMemberWorkspaceData(targetMid);
     const bootstrap = serverErpEngine.getScopedBootstrap(session);
     res.json({
@@ -1086,6 +1322,11 @@ async function startServer() {
       mid: targetMid,
       unlockedPacks: workspace.unlockedPacks,
       recordsBySys: workspace.recordsBySys,
+      subscriptions: workspace.subscriptions,
+      profession: workspace.profession,
+      customModules: workspace.customModules,
+      orderReceipts: workspace.orderReceipts,
+      metaUpdatedAt: workspace.metaUpdatedAt,
       bootstrap,
       syncedAt: new Date().toISOString(),
     });
@@ -1122,7 +1363,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/member/workspace/:mid/packs', requireAuth, verifyHqMutationOrigin, (req: AuthedRequest, res) => {
+  app.post('/api/member/workspace/:mid/packs', requireAuth, verifyHqMutationOrigin, async (req: AuthedRequest, res) => {
     const session = req.erpSession!;
     const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
     if (!canAccessMemberWorkspace(session, targetMid)) {
@@ -1137,12 +1378,117 @@ async function startServer() {
     const validPacks = body.packs
       .map((p) => String(p || '').trim().toUpperCase())
       .filter((p) => ALLOWED_WORKSPACE_PACKS.has(p));
-    const savedPacks = serverErpEngine.saveMemberWorkspacePacks(targetMid, validPacks);
-    void forwardErpEventToGas('saveMemberPacks', {
-      memberMid: targetMid,
-      packs: savedPacks,
+    const savedMeta = serverErpEngine.saveMemberWorkspaceMeta(targetMid, {
+      unlockedPacks: validPacks,
     });
-    res.json({ ok: true, unlockedPacks: savedPacks, syncedAt: new Date().toISOString() });
+    const gasSyncPromise = Promise.all([
+      forwardErpEventToGas('saveMemberPacks', {
+        memberMid: targetMid,
+        packs: savedMeta.unlockedPacks,
+      }),
+      forwardErpEventToGas('upsertWorkspaceRecord', {
+        memberMid: targetMid,
+        sysType: '_WORKSPACE_META',
+        record: {
+          ID: 'META',
+          unlockedPacks: savedMeta.unlockedPacks,
+          subscriptions: savedMeta.subscriptions,
+          profession: savedMeta.profession,
+          customModules: savedMeta.customModules,
+          orderReceipts: savedMeta.orderReceipts,
+          updatedAt: savedMeta.updatedAt,
+        },
+      }),
+    ]);
+    await Promise.race([
+      gasSyncPromise,
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+    res.json({
+      ok: true,
+      unlockedPacks: savedMeta.unlockedPacks,
+      metaUpdatedAt: savedMeta.updatedAt,
+      syncedAt: new Date().toISOString(),
+    });
+  });
+
+  app.post('/api/member/workspace/:mid/meta', requireAuth, verifyHqMutationOrigin, async (req: AuthedRequest, res) => {
+    const session = req.erpSession!;
+    const targetMid = sanitizePublicText(req.params.mid, 24).toUpperCase();
+    if (!canAccessMemberWorkspace(session, targetMid)) {
+      res.status(403).json({ ok: false, error: '權限不足：僅能更新本人已開通系統與個人設定' });
+      return;
+    }
+    const body = (req.body || {}) as Record<string, unknown>;
+
+    const validPacks = Array.isArray(body.unlockedPacks)
+      ? body.unlockedPacks
+          .map((p) => String(p || '').trim().toUpperCase())
+          .filter((p) => ALLOWED_WORKSPACE_PACKS.has(p))
+      : undefined;
+
+    let profession: string | null | undefined = undefined;
+    if (body.profession === null) {
+      profession = null;
+    } else if (typeof body.profession === 'string') {
+      const cleanProf = body.profession.trim().toUpperCase();
+      if (ALLOWED_PROFESSION_KEYS.has(cleanProf)) {
+        profession = cleanProf;
+      }
+    }
+
+    const subscriptions = sanitizeWorkspaceSubscriptions(body.subscriptions);
+    const customModules = sanitizeWorkspaceCustomModules(body.customModules);
+    const orderReceipts = sanitizeWorkspaceOrderReceipts(body.orderReceipts);
+
+    const savedMeta = serverErpEngine.saveMemberWorkspaceMeta(targetMid, {
+      unlockedPacks: validPacks,
+      subscriptions,
+      profession,
+      customModules,
+      orderReceipts,
+    });
+
+    const gasSyncPromise = Promise.all([
+      forwardErpEventToGas('saveMemberPacks', {
+        memberMid: targetMid,
+        packs: savedMeta.unlockedPacks,
+      }),
+      forwardErpEventToGas('upsertWorkspaceRecord', {
+        memberMid: targetMid,
+        sysType: '_WORKSPACE_META',
+        record: {
+          ID: 'META',
+          unlockedPacks: savedMeta.unlockedPacks,
+          subscriptions: savedMeta.subscriptions,
+          profession: savedMeta.profession,
+          customModules: savedMeta.customModules,
+          orderReceipts: savedMeta.orderReceipts,
+          updatedAt: savedMeta.updatedAt,
+        },
+      }),
+    ]);
+
+    let gasSynced = false;
+    await Promise.race([
+      gasSyncPromise.then(() => {
+        gasSynced = true;
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 3500)),
+    ]);
+
+    res.json({
+      ok: true,
+      mid: targetMid,
+      unlockedPacks: savedMeta.unlockedPacks,
+      subscriptions: savedMeta.subscriptions,
+      profession: savedMeta.profession,
+      customModules: savedMeta.customModules,
+      orderReceipts: savedMeta.orderReceipts,
+      metaUpdatedAt: savedMeta.updatedAt,
+      gasSynced,
+      syncedAt: new Date().toISOString(),
+    });
   });
 
   app.post(
@@ -1277,8 +1623,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Confidential ERP Server] Listening on http://0.0.0.0:${PORT} (mode=${IS_PROD ? 'production' : 'development'})`);
-    // Non-blocking cold-start hydration from Google Sheets (prevents Render free-tier sleep data reset)
-    void hydrateEngineFromGas('startup');
+    // Shared cold-start hydration promise (awaited by login/session/workspace reads so Render sleep never resets activated systems)
+    void triggerSharedHydration('startup');
   });
 }
 

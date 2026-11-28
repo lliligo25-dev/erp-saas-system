@@ -31,6 +31,7 @@ import { UserRole } from '../types/erp';
 import {
   OFFICIAL_GAS_EXEC_URL,
   OFFICIAL_SHARED_APP_URL,
+  buildBreakfastPortalUrl,
   buildRolePortalUrl,
   buildPublicJoinUrl,
   buildPublicMobileCenterUrl,
@@ -60,7 +61,7 @@ interface PublicShareDeployModalProps {
   onHydrated?: () => void;
 }
 
-type PublicTargetChoice = 'PUBLIC_JOIN' | 'PUBLIC_CENTER' | 'MEMBER' | 'STORE' | 'CENTER' | 'HQ_STAFF';
+type PublicTargetChoice = 'PUBLIC_JOIN' | 'BREAKFAST' | 'PUBLIC_CENTER' | 'MEMBER' | 'STORE' | 'CENTER' | 'HQ_STAFF';
 
 const CORRECTED_EMBED_HTML = `<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -93,7 +94,7 @@ const CORRECTED_EMBED_HTML = `<!DOCTYPE html>
       var isLine = /\\bLine\\//i.test(ua) || /\\bLIFF\\b/i.test(ua);
       var isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|\\bLine\\//i.test(ua) || (window.innerWidth > 0 && window.innerWidth <= 820);
       function mount(p) {
-        var keys = ["portal", "id", "sponsor", "ref", "qrToken", "device", "inapp", "openExternalBrowser"];
+        var keys = ["portal", "id", "sponsor", "ref", "qrToken", "device", "inapp", "openExternalBrowser", "shop", "table", "tab"];
         var qs = [], hasDev = false;
         for (var i = 0; i < keys.length; i++) {
           var v = p && p[keys[i]];
@@ -226,6 +227,12 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
         openExternalBrowser: lineExternalMode,
       });
     }
+    if (targetChoice === 'BREAKFAST') {
+      return buildBreakfastPortalUrl(activeBaseUrl, {
+        device: mobileMode ? 'mobile' : 'desktop',
+        openExternalBrowser: lineExternalMode,
+      });
+    }
     if (targetChoice === 'PUBLIC_CENTER') {
       return buildPublicMobileCenterUrl(activeBaseUrl, {
         openExternalBrowser: lineExternalMode,
@@ -333,15 +340,17 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
     const roleLabel =
       targetChoice === 'PUBLIC_JOIN'
         ? '免登入掃碼入會 · 免費開通 AI 1+1'
-        : targetChoice === 'MEMBER'
-          ? '一般會員手機專用入口'
-          : targetChoice === 'STORE'
-            ? '一般營業店手機專用入口'
-            : targetChoice === 'CENTER'
-              ? '一般教育中心手機專用入口'
-              : targetChoice === 'HQ_STAFF'
-                ? '總部營運專屬安全入口'
-                : '企業智能雲端手機服務中心';
+        : targetChoice === 'BREAKFAST'
+          ? '專屬早餐店系統 · 月租 500 元 (1×5)'
+          : targetChoice === 'MEMBER'
+            ? '一般會員手機專用入口'
+            : targetChoice === 'STORE'
+              ? '一般營業店手機專用入口'
+              : targetChoice === 'CENTER'
+                ? '一般教育中心手機專用入口'
+                : targetChoice === 'HQ_STAFF'
+                  ? '總部營運專屬安全入口'
+                  : '企業智能雲端手機服務中心';
 
     ctx.fillStyle = '#1E293B';
     ctx.beginPath();
@@ -504,6 +513,7 @@ export const PublicShareDeployModal: React.FC<PublicShareDeployModalProps> = ({
         ]
       : [
           { id: 'PUBLIC_JOIN', label: '免登入掃碼入會頁' },
+          { id: 'BREAKFAST', label: '專屬早餐店系統 (獨立 · 月租500)' },
           { id: 'MEMBER', label: '一般會員入口' },
           { id: 'STORE', label: '一般營業店入口' },
           { id: 'CENTER', label: '一般教育中心入口' },

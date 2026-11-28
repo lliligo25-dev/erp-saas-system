@@ -9,7 +9,6 @@ import { erpEngine } from '../services/erpEngine';
 import { HorizontalScrollStrip } from './HorizontalScrollStrip';
 import {
   apiFetchMemberWorkspace,
-  apiSaveMemberWorkspacePacks,
   apiSaveMemberWorkspaceRecord,
 } from '../services/confidentialApiClient';
 import {
@@ -39,6 +38,9 @@ import {
   saveMemberSidebarPackOrder,
   getMemberSidebarTopOrder,
   saveMemberSidebarTopOrder,
+  MEMBER_WORKSPACE_META_UPDATED_EVENT,
+  applyRemoteMemberWorkspaceMeta,
+  pushMemberWorkspaceMetaNow,
 } from '../services/memberFiveStarConfig';
 import {
   syncMemberPurchasedProductsToNodes,
@@ -135,6 +137,7 @@ import {
 } from 'lucide-react';
 import { SoftwareOrderSystemView } from './SoftwareOrderSystemView';
 import { PersonalTodoBoard } from './PersonalTodoBoard';
+import { MemberPersonalProHome } from './MemberPersonalProHome';
 import {
   getOverdueCount,
   syncMemberTodosToGas,
@@ -143,6 +146,7 @@ import {
 } from '../services/gasTodoSyncService';
 
 type ActiveSysKey =
+  | 'HOME'
   | 'ALL'
   | 'ORG_TREE'
   | 'BOOKING'
@@ -179,6 +183,7 @@ interface MemberFiveStarWorkspaceProps {
   initialOrgNodeId?: string;
   onNavigateToPortal?: () => void;
   onNavigateToBooking?: () => void;
+  onOpenBreakfastSystem?: () => void;
   onNodesChanged?: () => void;
   onNavigateToRegisterWithClient?: (client: {
     name: string;
@@ -352,6 +357,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   initialOrgNodeId,
   onNavigateToPortal,
   onNavigateToBooking,
+  onOpenBreakfastSystem,
   onNodesChanged,
   onNavigateToRegisterWithClient,
 }) => {
@@ -498,8 +504,8 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   const persistUnlockedPacks = useCallback(
     (nextPacks: string[]) => {
       setUnlockedPacks(nextPacks);
+      // saveMemberUnlockedPacks 自動觸發跨裝置 meta + packs 雲端與 Google Sheets 雙向寫入
       saveMemberUnlockedPacks(memberMid, nextPacks);
-      void apiSaveMemberWorkspacePacks(memberMid, nextPacks);
     },
     [memberMid]
   );
@@ -508,7 +514,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [activeSys, setActiveSys] = useState<ActiveSysKey>(() => (initialOrgNodeId ? 'ORG_TREE' : 'ALL'));
+  const [activeSys, setActiveSys] = useState<ActiveSysKey>(() => (initialOrgNodeId ? 'ORG_TREE' : 'HOME'));
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [dateFilter, setDateFilter] = useState<DateFilterMode>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
@@ -528,31 +534,42 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
   }, []);
 
   useEffect(() => {
+    const normMid = memberMid.trim().toUpperCase();
     const onTodosUpdated = (ev: Event) => {
       const detail = (ev as CustomEvent<{ memberMid?: string }>).detail;
-      if (!detail?.memberMid || detail.memberMid === memberMid) {
+      if (!detail?.memberMid || detail.memberMid.trim().toUpperCase() === normMid) {
         setRefreshTick((t) => t + 1);
       }
     };
     const onCloudUpdated = (ev: Event) => {
       const detail = (ev as CustomEvent<{ memberMid?: string }>).detail;
-      if (!detail?.memberMid || detail.memberMid === memberMid) {
+      if (!detail?.memberMid || detail.memberMid.trim().toUpperCase() === normMid) {
+        setRefreshTick((t) => t + 1);
+      }
+    };
+    const onMetaUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ memberMid?: string }>).detail;
+      if (!detail?.memberMid || detail.memberMid.trim().toUpperCase() === normMid) {
+        setUnlockedPacks(getMemberUnlockedPacks(memberMid));
+        setCustomModules(getMemberCustomModules(memberMid));
         setRefreshTick((t) => t + 1);
       }
     };
     window.addEventListener(TODOS_UPDATED_EVENT, onTodosUpdated);
     window.addEventListener(CLOUD_VAULT_UPDATED_EVENT, onCloudUpdated);
+    window.addEventListener(MEMBER_WORKSPACE_META_UPDATED_EVENT, onMetaUpdated);
     return () => {
       window.removeEventListener(TODOS_UPDATED_EVENT, onTodosUpdated);
       window.removeEventListener(CLOUD_VAULT_UPDATED_EVENT, onCloudUpdated);
+      window.removeEventListener(MEMBER_WORKSPACE_META_UPDATED_EVENT, onMetaUpdated);
     };
   }, [memberMid]);
 
-  // Cross-device cloud sync: pull latest server records + photos + CRM/Events and auto-upload any legacy local-only records
+  // Cross-device cloud sync: pull latest activated systems, subscriptions, profession, custom modules, records & photos
   const syncWorkspaceFromCloud = useCallback(
     async (manual = false) => {
       const now = Date.now();
-      if (!manual && now - lastCloudPullAtRef.current < 8000) return;
+      if (!manual && now - lastCloudPullAtRef.current < 2500) return;
       lastCloudPullAtRef.current = now;
       setWorkspaceCloudSyncing(true);
       try {
@@ -569,19 +586,22 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           erpEngine.hydrateFromServer(res.bootstrap);
         }
 
-        const localPacks = getMemberUnlockedPacks(memberMid);
-        const serverPacks = Array.isArray(res.unlockedPacks) ? res.unlockedPacks : null;
-        const mergedPacks = Array.from(new Set([...(serverPacks || []), ...localPacks]));
-        if (mergedPacks.length > 0) {
-          setUnlockedPacks(mergedPacks);
-          saveMemberUnlockedPacks(memberMid, mergedPacks);
-          if (!serverPacks || mergedPacks.length > serverPacks.length) {
-            void apiSaveMemberWorkspacePacks(memberMid, mergedPacks);
-          }
+        const metaResult = applyRemoteMemberWorkspaceMeta(memberMid, {
+          unlockedPacks: res.unlockedPacks,
+          subscriptions: res.subscriptions,
+          profession: res.profession,
+          customModules: res.customModules,
+          orderReceipts: res.orderReceipts,
+          metaUpdatedAt: res.metaUpdatedAt,
+        });
+        setUnlockedPacks(metaResult.unlockedPacks);
+        setCustomModules(metaResult.customModules);
+        if (metaResult.needsUploadLocal) {
+          void pushMemberWorkspaceMetaNow(memberMid);
         }
 
         const serverBySys = res.recordsBySys || {};
-        const customSysKeys = getMemberCustomModules(memberMid).map((m) => `${m.baseKey}_M`);
+        const customSysKeys = metaResult.customModules.map((m) => `${m.baseKey}_M`);
         const dynamicSysKeys = [
           ...Object.keys(SYS_CONFIG).filter(
             (k) => !['CONTACT_M', 'CONTACT_T', 'EVENT_M', 'EVENT_T', 'BOOKING_T'].includes(k)
@@ -627,7 +647,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
         setRefreshTick((t) => t + 1);
         if (manual) {
-          setToastMsg('已完成跨裝置雲端同步！手機與桌機建檔資料與照片已保持一致。');
+          setToastMsg('已完成跨裝置雲端同步！手機與桌機已開通系統、訂閱、職業與建檔資料已完全一致。');
           window.setTimeout(() => setToastMsg(null), 3200);
         }
       } finally {
@@ -644,9 +664,15 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
         void syncWorkspaceFromCloud(false);
       }
     };
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void syncWorkspaceFromCloud(false);
+      }
+    }, 20000);
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
     return () => {
+      window.clearInterval(intervalId);
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
@@ -1263,10 +1289,25 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
       notifyNodesUpdated(memberMid);
       onNodesChanged?.();
     } else if (typeof activeSys === 'string' && activeSys.startsWith(`${baseKey}_`)) {
-      setActiveSys('ALL');
+      setActiveSys('HOME');
     }
     triggerRefresh();
   };
+
+  // Ensure a pack is unlocked without toggling it off (used by Personal/Professional Home cards)
+  const handleEnsurePackUnlocked = useCallback(
+    (baseKey: string) => {
+      if (!baseKey || baseKey === 'BREAKFAST') return;
+      if (unlockedPacks.includes(baseKey)) return;
+      const next = [...unlockedPacks, baseKey];
+      persistUnlockedPacks(next);
+      syncMemberPurchasedProductsToNodes(memberMid);
+      notifyNodesUpdated(memberMid);
+      onNodesChanged?.();
+      triggerRefresh();
+    },
+    [unlockedPacks, persistUnlockedPacks, memberMid, onNodesChanged]
+  );
 
   // Share mode handlers
   const handleToggleShareMode = () => {
@@ -2033,7 +2074,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
           <button
             type="button"
-            onClick={resetAllFilters}
+            onClick={() => handleSwitchSys('HOME')}
             className="flex items-center gap-2 text-left cursor-pointer min-w-0"
           >
             <div className="w-8 h-8 rounded-lg bg-[#cc0000] text-white flex items-center justify-center shrink-0 shadow-xs">
@@ -2055,7 +2096,13 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             <input
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSearchTerm(v);
+                if (activeSys === 'HOME' && v.trim()) {
+                  setActiveSys('ALL');
+                }
+              }}
               placeholder={
                 activeConf
                   ? activeConf.searchMsg.replace('🔍 ', '')
@@ -2179,8 +2226,26 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
             </button>
           </div>
 
-          {/* Sidebar Header: Draggable Core Nav Shortcuts */}
+          {/* Sidebar Header: Personal/Pro Home Shortcut + Draggable Core Nav Shortcuts */}
           <div className="pt-2 px-2 shrink-0 space-y-1">
+            <button
+              type="button"
+              onClick={() => handleSwitchSys('HOME')}
+              className={`w-full flex items-center rounded-xl transition-colors cursor-pointer ${
+                sidebarCollapsed
+                  ? 'flex-col py-2.5 justify-center gap-1'
+                  : 'px-2.5 h-10 gap-2.5'
+              } ${
+                activeSys === 'HOME'
+                  ? 'bg-slate-900 text-white font-bold shadow-xs'
+                  : 'bg-slate-100/90 hover:bg-slate-200/80 text-slate-800 font-semibold'
+              }`}
+            >
+              <Home className={`w-4 h-4 shrink-0 ${activeSys === 'HOME' ? 'text-amber-400' : 'text-slate-700'}`} />
+              <span className={sidebarCollapsed ? 'text-[10px] truncate' : 'text-sm truncate'}>
+                首頁（私人 / 專業）
+              </span>
+            </button>
             {sidebarTopOrder.map((navId, navIdx) => {
               const isDragTarget = dragOverTopId === navId && draggedTopId !== navId;
               const isBeingDragged = draggedTopId === navId;
@@ -2806,8 +2871,33 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
 
         {/* ================= MAIN CONTENT AREA ================= */}
         <main className="flex-1 min-w-0 flex flex-col bg-[#f8fafc]">
+          {/* ================= PERSONAL / PROFESSIONAL DUAL-CARD HOME ================= */}
+          {activeSys === 'HOME' && (
+            <MemberPersonalProHome
+              memberMid={memberMid}
+              memberName={member?.name || memberMid}
+              unlockedPacks={unlockedPacks}
+              sysCounts={sysCounts}
+              overdueTodoCount={overdueTodoCount}
+              cloudTabCount={cloudVault.sheetTabs.length}
+              onEnterModule={(sysKey, ensureBaseKey) => {
+                if (ensureBaseKey) {
+                  handleEnsurePackUnlocked(ensureBaseKey);
+                }
+                handleSwitchSys(sysKey);
+              }}
+              onTogglePersonalPack={handleTogglePack}
+              onEnsurePackUnlocked={handleEnsurePackUnlocked}
+              onOpenAllFeed={() => handleSwitchSys('ALL')}
+              onOpenOrgTree={() => handleSwitchSys('ORG_TREE')}
+              onOpenOrderStore={() => handleSwitchSys('ORDER_STORE')}
+              onOpenCloudSheet={() => setCloudModalOpen(true)}
+              onOpenBreakfastSystem={onOpenBreakfastSystem}
+            />
+          )}
+
           {/* Sticky Top Section: Dynamic Filter Chips */}
-          {activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && (
+          {activeSys !== 'HOME' && activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && (
             <div className="sticky top-[60px] z-20 bg-[#f8fafc]/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
               {/* Filter Chips Row 1: Category / Module Chips (Horizontally Scrollable) */}
               <div className="px-3 sm:px-6 py-2.5 flex items-center justify-between gap-3 min-w-0">
@@ -3248,7 +3338,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           )}
 
           {/* ================= REVENUE KPI DASHBOARD (for _T modules with Amount) ================= */}
-          {activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && revenueKpi && (
+          {activeSys !== 'HOME' && activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && revenueKpi && (
             <div className="px-5 pt-4">
               <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 text-white rounded-2xl p-4 sm:p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -3284,7 +3374,7 @@ export const MemberFiveStarWorkspace: React.FC<MemberFiveStarWorkspaceProps> = (
           )}
 
           {/* ================= MEDIA CARDS GRID ================= */}
-          {activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && (
+          {activeSys !== 'HOME' && activeSys !== 'ORG_TREE' && activeSys !== 'ORDER_STORE' && activeSys !== 'TODO_BOARD' && (
             <div className="flex-1 pb-24">
               {activeModulePerm && !activeModulePerm.canCreate && (
                 <div className="px-5 pt-4">

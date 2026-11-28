@@ -101,6 +101,10 @@ export interface ParsedPortalUrl {
   qrToken: string | null;
   isPublicJoin: boolean;
   sponsorMid: string | null;
+  isBreakfastPortal: boolean;
+  breakfastShop: string | null;
+  breakfastTable: string | null;
+  breakfastTab: string | null;
 }
 
 function resolveSlugToRole(rawSlug: string | null | undefined): UserRole | null {
@@ -127,6 +131,10 @@ export function parsePortalFromUrl(): ParsedPortalUrl {
       qrToken: null,
       isPublicJoin: false,
       sponsorMid: null,
+      isBreakfastPortal: false,
+      breakfastShop: null,
+      breakfastTable: null,
+      breakfastTab: null,
     };
   }
 
@@ -138,10 +146,18 @@ export function parsePortalFromUrl(): ParsedPortalUrl {
       rawPortal === 'register' ||
       params.get('join') === '1';
 
-    let lockedRole = resolveSlugToRole(rawPortal);
+    const hashCleaned = (window.location.hash || '').replace(/^#\/?/, '').toLowerCase();
+    const isBreakfastPortal =
+      rawPortal === 'breakfast' ||
+      rawPortal === 'brunch' ||
+      params.get('breakfast') === '1' ||
+      hashCleaned === 'breakfast' ||
+      hashCleaned.startsWith('portal=breakfast');
+
+    let lockedRole = isBreakfastPortal ? null : resolveSlugToRole(rawPortal);
 
     // Also tolerate hash-style portal indicator like #/member or #portal=member
-    if (!lockedRole && !isPublicJoin && window.location.hash) {
+    if (!lockedRole && !isPublicJoin && !isBreakfastPortal && window.location.hash) {
       const cleanedHash = window.location.hash.replace(/^#\/?/, '');
       if (cleanedHash.startsWith('portal=')) {
         lockedRole = resolveSlugToRole(cleanedHash.slice('portal='.length).split('&')[0]);
@@ -175,7 +191,28 @@ export function parsePortalFromUrl(): ParsedPortalUrl {
     const qrTokenRaw = params.get('qrToken');
     const qrToken = qrTokenRaw && qrTokenRaw.trim() ? qrTokenRaw.trim() : null;
 
-    return { lockedRole, targetId, deviceMode, qrToken, isPublicJoin, sponsorMid };
+    const breakfastShopRaw = params.get('shop');
+    const breakfastShop =
+      breakfastShopRaw && breakfastShopRaw.trim() ? breakfastShopRaw.trim() : null;
+    const breakfastTableRaw = params.get('table');
+    const breakfastTable =
+      breakfastTableRaw && breakfastTableRaw.trim() ? breakfastTableRaw.trim() : null;
+    const breakfastTabRaw = params.get('tab');
+    const breakfastTab =
+      breakfastTabRaw && breakfastTabRaw.trim() ? breakfastTabRaw.trim().toLowerCase() : null;
+
+    return {
+      lockedRole,
+      targetId,
+      deviceMode,
+      qrToken,
+      isPublicJoin,
+      sponsorMid,
+      isBreakfastPortal,
+      breakfastShop,
+      breakfastTable,
+      breakfastTab,
+    };
   } catch {
     return {
       lockedRole: null,
@@ -184,6 +221,10 @@ export function parsePortalFromUrl(): ParsedPortalUrl {
       qrToken: null,
       isPublicJoin: false,
       sponsorMid: null,
+      isBreakfastPortal: false,
+      breakfastShop: null,
+      breakfastTable: null,
+      breakfastTab: null,
     };
   }
 }
@@ -396,6 +437,40 @@ export function buildPublicJoinUrl(
     params.set('sponsor', sponsorMid.trim().toUpperCase());
   }
   if (options?.device !== 'desktop') {
+    params.set('device', 'mobile');
+  }
+  if (options?.openExternalBrowser) {
+    params.set('openExternalBrowser', '1');
+  }
+  return `${originAndPath}?${params.toString()}`;
+}
+
+/**
+ * 產生「獨立專屬早餐店智慧系統（月租 500 元 · 每代 1×5 分紅）」公開網址
+ */
+export function buildBreakfastPortalUrl(
+  baseUrl?: string,
+  options?: {
+    device?: 'mobile' | 'desktop';
+    openExternalBrowser?: boolean;
+    shop?: string;
+    table?: string;
+    tab?: string;
+  }
+): string {
+  const originAndPath = normalizeBaseUrlForQuery(baseUrl || OFFICIAL_SHARED_APP_URL);
+  const params = new URLSearchParams();
+  params.set('portal', 'breakfast');
+  if (options?.tab && options.tab.trim()) {
+    params.set('tab', options.tab.trim());
+  }
+  if (options?.shop && options.shop.trim()) {
+    params.set('shop', options.shop.trim());
+  }
+  if (options?.table && options.table.trim()) {
+    params.set('table', options.table.trim());
+  }
+  if (options?.device === 'mobile') {
     params.set('device', 'mobile');
   }
   if (options?.openExternalBrowser) {
